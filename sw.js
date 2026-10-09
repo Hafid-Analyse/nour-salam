@@ -1,10 +1,10 @@
 /**
  * عامل الخدمة — السجل اليومي
- * • يحفظ ملفات الواجهة لفتح فوري حتى دون اتصال
- * • يحدّثها في الخلفية تلقائياً (Stale-While-Revalidate)
- * • لا يخزّن طلبات الخادم (البيانات تبقى حيّة دائماً)
+ * • ملفات الواجهة: من الشبكة أولاً (أحدث نسخة دائماً)، ومن الذاكرة عند انقطاع الاتصال
+ * • الأيقونات والخطوط: من الذاكرة أولاً (أسرع)
+ * • طلبات الخادم (Apps Script) لا تُخزَّن أبداً
  */
-const VERSION = 'ns-shell-v1';
+const VERSION = 'ns-shell-v2';
 const SHELL = [
   './', './index.html', './style.css', './app.js', './config.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'
@@ -28,14 +28,17 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
   const same = url.origin === self.location.origin;
   const font = /(^|\.)fonts\.(googleapis|gstatic)\.com$/.test(url.hostname);
-  if (!same && !font) return;   // طلبات Apps Script تمر مباشرة دون تخزين
+  if (!same && !font) return;
 
+  const staticAsset = font || /\/icons\//.test(url.pathname);
   e.respondWith(caches.open(VERSION).then(async cache => {
     const hit = await cache.match(req, { ignoreSearch: same });
     const net = fetch(req).then(res => {
       if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone());
       return res;
-    }).catch(() => hit || (req.mode === 'navigate' ? cache.match('./index.html') : undefined));
-    return hit || net;
+    });
+    if (staticAsset && hit) { net.catch(() => {}); return hit; }
+    try { return await net; }
+    catch (err) { return hit || (req.mode === 'navigate' ? cache.match('./index.html') : Response.error()); }
   }));
 });
