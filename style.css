@@ -487,3 +487,29 @@ textarea.inp { min-height: 110px; resize: vertical; }
 .rsec h4 { display: flex; align-items: center; gap: 8px; font-family: var(--f-ui); font-size: .84rem; font-weight: 600; color: var(--p); margin-bottom: 6px; }
 .rsec h4::before { content: ""; width: 6px; height: 6px; border-radius: 1.5px; transform: rotate(45deg); background: var(--logo-accent); }
 .rsec .tally { margin-bottom: 6px; }
+
+/* ───────── صفحة البداية ───────── */
+.resume { display: flex; align-items: center; gap: 10px; padding: 12px 14px; margin-bottom: 14px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); border-inline-start: 4px solid var(--warn); box-shadow: var(--shadow); }
+.resume > div { flex: 1; min-width: 0; }
+.resume b { display: block; font-family: var(--f-ui); font-weight: 600; font-size: .95rem; }
+.resume small { color: var(--muted); font-size: .8rem; }
+.resume .badge { width: 36px; height: 36px; border-radius: 11px; background: linear-gradient(135deg, #F2B544, var(--warn)); }
+.resume .badge .ic { width: 18px; height: 18px; }
+.home-acts { display: flex; gap: 8px; padding: 10px 14px 12px; }
+.home-acts .btn { flex: 1; }
+.home-card .report-b { border-top: 1px solid var(--line); }
+.ic.flip { transform: rotate(180deg); }
+.newbtn { width: 100%; height: 56px; font-size: 1.05rem; margin-top: 4px; }
+.newbtn .ic { width: 22px; height: 22px; }
+.empty.first { padding: 34px 20px 26px; }
+.empty.first p { color: var(--muted); line-height: 1.9; margin: 0; }
+.empty.first b { color: var(--ink); font-family: var(--f-ui); font-size: 1.05rem; }
+
+/* ───────── رأس الرحلة ───────── */
+.jhead { display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; flex-wrap: wrap; }
+.jhead h3 { font-size: 1.08rem; font-weight: 600; font-family: var(--f-ui); }
+.datechip { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; background: var(--p-soft); color: var(--p); font-family: var(--f-ui); font-size: .8rem; font-weight: 600; }
+.datechip .ic { width: 15px; height: 15px; }
+.calcard .sec-h { margin-bottom: 10px; }
+.cd.sent { pointer-events: none; }
+.cd[disabled] { cursor: default; }

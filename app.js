@@ -2,9 +2,9 @@
  * ═══════════════════════════════════════════════════════════
  *  السجل اليومي — مدرسة نور السلام القرآنية
  *  الواجهة (GitHub Pages) — تتصل بخادم Apps Script
- *  • رحلة واحدة: الحضور ← الاستظهار ← القرآن ← الدروس ← الإرسال
- *  • يُرسَل اليوم كاملاً مرة واحدة: إما 🟢 مُرسَل أو 🔴 غير مُرسَل
- *  • آخر تقرير وحده قابل للتعديل · المسودات تُحفظ تلقائياً
+ *  • صفحة البداية: آخر تقرير (التفاصيل · تعديل) + تقرير جديد
+ *  • الرحلة: التاريخ ← الحضور ← الاستظهار ← القرآن ← الدروس ← الإرسال
+ *  • يُرسَل اليوم كاملاً مرة واحدة: 🟢 مُرسَل أو 🔴 غير مُرسَل
  * ═══════════════════════════════════════════════════════════
  */
 (() => {
@@ -14,11 +14,12 @@
   const API_URL = (window.APP_CONFIG || {}).API_URL || '';
   const T = { MAIN: 'معلم قسم', TALQIN: 'تلقين', MUNAFASA: 'منافسة' };
   const STEP = {
-    att:     { label: 'الحضور',    icon: 'users' },
-    rec:     { label: 'الاستظهار', icon: 'mic' },
-    quran:   { label: 'القرآن',    icon: 'book' },
-    lessons: { label: 'الدروس',    icon: 'note' },
-    review:  { label: 'الإرسال',   icon: 'send' }
+    date:    { label: 'التاريخ' },
+    att:     { label: 'الحضور' },
+    rec:     { label: 'الاستظهار' },
+    quran:   { label: 'القرآن' },
+    lessons: { label: 'الدروس' },
+    review:  { label: 'الإرسال' }
   };
   const ORD = ['الأولى', 'الثانية'];
   const MAX_LESSONS = 2;
@@ -28,7 +29,8 @@
   const WD_SHORT = { 0: 'أحد', 1: 'إثنين', 2: 'ثلاثاء', 3: 'أربعاء', 4: 'خميس', 5: 'جمعة', 6: 'سبت' };
 
   const app = document.getElementById('app');
-  const S = { session: null, cls: null, date: null, draft: null, editing: false, recs: {}, calMonth: null, pendingEdit: false, lastIdx: 0 };
+  // view: home | journey · draft: { date, att, rec, log, step, dirty }
+  const S = { session: null, cls: null, view: 'home', draft: null, editing: false, recs: {}, calMonth: null, homeOpen: false, lastIdx: 0 };
 
   /* ───────────── أدوات ───────────── */
   const LS = {
@@ -43,7 +45,6 @@
   const clone = o => JSON.parse(JSON.stringify(o));
   const cfg = () => S.session.config;
   const isMain = () => !!S.cls && S.cls.role === T.MAIN;
-  const dayKey = () => S.cls.id + '|' + S.date;
   const students = () => (S.cls && S.cls.students) || [];
   const str = v => (v == null ? '' : String(v));
   const absentLabel = () => cfg().lists.attendance[1];
@@ -73,7 +74,9 @@
     download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
     cal: '<rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/>',
     pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
-    lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
+    lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    chevD: '<path d="m6 9 6 6 6-6"/>',
+    resume: '<path d="M12 8v4l3 2"/><path d="M3.05 11a9 9 0 1 1 .5 4"/><path d="M3 4v5h5"/>'
   };
   const ic = (n, c) => `<svg class="ic ${c || ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n] || ''}</svg>`;
   const logo = kind => `<svg class="logo" aria-hidden="true"><use href="#logo-${kind}"/></svg>`;
@@ -98,6 +101,7 @@
   const MONTH = new Intl.DateTimeFormat('ar', { month: 'long', year: 'numeric', numberingSystem: 'latn' });
   function today() { const loc = isoOf(new Date()), srv = (S.session && cfg().today) || ''; return srv > loc ? srv : loc; }
   function dLabel(s) {
+    if (!s) return { wd: '', short: '', full: '' };
     const d = parse(s);
     return { wd: s === today() ? 'اليوم' : WD.format(d), short: d.getDate() + '/' + (d.getMonth() + 1), full: WD.format(d) + ' ' + d.getDate() + '/' + (d.getMonth() + 1) + '/' + d.getFullYear() };
   }
@@ -108,20 +112,15 @@
     const ss = cfg().seasonStart; if (ss && s < ss) return false;
     return isTeach(s) && !holiday(s);
   }
-  function defaultDate() {
-    const d = parse(today());
-    for (let i = 0; i < 21; i++) { const s = isoOf(d); if (dateOk(s)) return s; d.setDate(d.getDate() - 1); }
-    return today();
-  }
   function missFloor() {
     const ss = cfg().seasonStart; if (ss) return ss;
     const d = parse(today()); d.setDate(d.getDate() - 30); return isoOf(d);
   }
-
-  /* حالة اليوم: يحددها التقرير اليومي المرسَل (مرة واحدة لكل الأجزاء) */
+  /* فهرس التقارير المرسَلة: يحدده السجل اليومي (يُرسَل مع الحضور والاستظهار) */
   const index = () => (S.cls && S.cls.index && S.cls.index.log) || { dates: [], off: [], last: '' };
-  const status = () => { const i = index(); return i.dates.indexOf(S.date) < 0 ? 'new' : (i.last === S.date ? 'last' : 'locked'); };
-  const formOpen = () => status() === 'new' || (status() === 'last' && S.editing);
+  const isSent = s => index().dates.indexOf(s) > -1;
+  /* يوم يمكن اختياره لتقرير جديد: يوم دراسة مضى (أو اليوم)، ليس عطلة، ولم يُرسَل */
+  const pickable = s => dateOk(s) && !isSent(s);
 
   function getPath(o, path) { return path.split('.').reduce((a, k) => (a == null ? a : a[k]), o); }
   function setPath(o, path, v) { const ks = path.split('.'), last = ks.pop(); ks.reduce((a, k) => a[k], o)[last] = v; }
@@ -205,8 +204,7 @@
       const c = d.classes.find(x => x.id === S.cls.id);
       if (!c) { renderPicker(); return S.session; }
       S.cls = c;
-      if (!dateOk(S.date)) { S.date = defaultDate(); saveUI(); loadDay(); }
-      else safeRefresh();
+      afterIndexChange();
     }
     return S.session;
   }
@@ -219,20 +217,21 @@
       S.session.classes.forEach(c => { if (d[c.id]) c.index = d[c.id]; });
       LS.set('session', S.session);
       S.recs = {};
-      safeRefresh();
+      afterIndexChange();
     } catch (e) {}
   }
-  function safeRefresh() {
+  /* إعادة رسم ما يتأثر بالفهرس فقط، دون إزعاج معلم يكتب */
+  function afterIndexChange() {
+    if (!S.cls) return;
+    if (S.view === 'home') return renderHome(false);
     const box = $('#calBox'); if (box) box.innerHTML = calHTML();
-    if (!S.cls || !S.draft || S.draft.dirty || S.editing) return;
-    S.draft = buildDraft(); renderPanel(false);
   }
 
-  /* ───────────── المسودة: تقرير اليوم كاملاً ───────────── */
+  /* ───────────── المسودة (واحدة لكل قسم) ───────────── */
   const emptyLesson = () => ({ subject: '', lesson: '', strategies: [], tools: [], tasks: [] });
   const freshOff = () => ({ on: false, reason: '', note: '' });
   const freshLog = () => ({ quran: { type: '', from: '', to: '', notes: '' }, lessons: [emptyLesson()], notes: '', off: freshOff() });
-  const freshDay = () => ({ att: {}, rec: {}, log: freshLog(), step: 0, dirty: false });
+  const freshDay = () => ({ date: '', att: {}, rec: {}, log: freshLog(), step: 0, dirty: false });
   function logFrom(l) {
     if (!l) return freshLog();
     const q = l.quran || {}, o = l.off || {};
@@ -243,34 +242,30 @@
       off: { on: !!o.on, reason: str(o.reason), note: str(o.note) }
     };
   }
-  const steps = () => (isMain() ? ['att', 'rec', 'quran', 'lessons', 'review'] : ['lessons', 'review']);
+  const steps = () => (isMain() ? ['date', 'att', 'rec', 'quran', 'lessons', 'review'] : ['date', 'lessons', 'review']);
+  const draftKey = () => 'draft.' + S.cls.id;
 
-  /** تقرير جديد = فارغ دائماً؛ تُسترجع فقط مسودة لم تُرسَل لنفس الحالة */
-  function buildDraft() {
-    const local = LS.get('draft.' + dayKey(), null);
-    S.editing = false;
-    const st = status();
-    if (local && local.dirty && local.log && ((st === 'new' && !local.editing) || (st === 'last' && local.editing))) {
-      S.editing = !!local.editing;
-      setTimeout(() => toast('استُرجعت تغييرات لم تُرسَل بعد', 'info'), 300);
-      const d = freshDay();
-      return Object.assign(d, { att: local.att || {}, rec: local.rec || {}, log: Object.assign(freshLog(), local.log), step: local.step || 0, dirty: true });
-    }
-    return freshDay();
+  /** المسودة المحفوظة لهذا القسم إن كانت ما زالت صالحة */
+  function savedDraft() {
+    const d = LS.get(draftKey(), null);
+    if (!d || !d.dirty || !d.log) return null;
+    if (d.editing) return d.date === index().last ? d : null;          // تعديل لم يعد هو الأخير
+    if (d.date && !pickable(d.date)) d.date = '';                        // التاريخ أُرسل أو لم يعد صالحاً
+    return d;
   }
   let persistTimer;
   function persist(now) {
     clearTimeout(persistTimer);
     const run = () => {
       if (!S.cls || !S.draft) return;
-      if (S.draft.dirty) LS.set('draft.' + dayKey(), Object.assign({}, S.draft, { editing: S.editing }));
-      else LS.del('draft.' + dayKey());
+      if (S.draft.dirty) LS.set(draftKey(), Object.assign({}, S.draft, { editing: S.editing })); else LS.del(draftKey());
     };
     now ? run() : (persistTimer = setTimeout(run, 250));
   }
   function markDirty() { S.draft.dirty = true; persist(); }
-  function cleanupDrafts() { const t = today(); LS.keys('draft.').forEach(k => { const d = k.split('|')[1]; if (!d || d > t) LS.del(k); }); }
-  function saveUI() { LS.set('ui', { classId: S.cls && S.cls.id, date: S.date }); }
+  function dropDraft() { clearTimeout(persistTimer); LS.del(draftKey()); }
+  function cleanupDrafts() { LS.keys('draft.').forEach(k => { if (k.indexOf('|') > -1) LS.del(k); }); }   // مسودات الإصدار السابق
+  function saveUI() { LS.set('ui', { classId: S.cls && S.cls.id }); }
 
   async function fetchRecord(date) {
     const key = S.cls.id + '|' + date;
@@ -279,7 +274,7 @@
     S.recs[key] = { att: r.att || {}, rec: r.rec || {}, log: logFrom(r.log) };
     return S.recs[key];
   }
-  const recOf = () => S.recs[dayKey()];
+  const recOf = date => S.recs[S.cls.id + '|' + date];
 
   /* ═════════════ الشاشات ═════════════ */
 
@@ -363,13 +358,12 @@
     syncChrome();
   }
 
-  /* ③ الشاشة الرئيسية */
-  function openClass(id, date) {
+  /* ③ الشاشة الرئيسية للقسم */
+  function openClass(id) {
     const c = S.session.classes.find(x => x.id === id);
     if (!c) return renderPicker();
-    S.cls = c;
-    S.date = dateOk(date) ? date : defaultDate();
-    saveUI(); renderMain(); loadDay();
+    S.cls = c; S.homeOpen = false;
+    saveUI(); renderMain(); renderHome(true);
   }
   function renderMain() {
     const c = S.cls, many = S.session.classes.length > 1;
@@ -381,48 +375,126 @@
             <div class="bar-id on-hero">${logo('mark')}<div><b>${esc(c.name)}</b><small>${esc(c.level)} · ${esc(c.type)}</small></div></div>
             ${topButtons()}
           </div>
-          <div class="bar-bottom">
-            <span class="who"><span class="nm">${esc(S.session.teacher.name)}</span> <em>${esc(c.role)}</em></span>
-            <button class="datebtn" data-act="cal" id="datebtn" aria-label="تغيير تاريخ الحصة"></button>
-          </div>
+          <div class="bar-bottom"><span class="who"><span class="nm">${esc(S.session.teacher.name)}</span> <em>${esc(c.role)}</em></span></div>
         </header>
         <main class="panel" id="panel"></main>
         <div id="navSlot"></div>
       </section>`;
-    syncChrome(); renderDateBtn();
-  }
-  function renderDateBtn() {
-    const b = $('#datebtn'); if (!b) return;
-    const l = dLabel(S.date);
-    b.innerHTML = `<small>تاريخ الحصة</small><span>${ic('cal')}<b>${l.wd}</b> ${l.short}</span>`;
+    syncChrome();
   }
 
-  /* ───────── التقويم: 🟢 مُرسَل · 🔴 غير مُرسَل ───────── */
-  function openCal() {
-    const d = parse(S.date); S.calMonth = [d.getFullYear(), d.getMonth()];
-    openSheet(`<div id="calBox">${calHTML()}</div>`);
-    refreshIndex();
+  /* ───────── صفحة البداية: آخر تقرير + تقرير جديد ───────── */
+  function renderHome(animate) {
+    S.view = 'home'; S.draft = null; S.editing = false;
+    const p = $('#panel'); if (!p) return;
+    p.classList.toggle('anim', !!animate);
+    const last = index().last, dr = savedDraft();
+    let html = '';
+    if (dr) {
+      const where = dr.date ? dLabel(dr.date).full : 'لم يُحدَّد التاريخ بعد';
+      html += `
+        <div class="resume" style="--i:1">
+          <span class="badge">${ic('resume')}</span>
+          <div><b>${dr.editing ? 'تعديل غير محفوظ' : 'تقرير غير مكتمل'}</b><small>${esc(where)} · خطوة ${STEP[steps()[Math.min(dr.step || 0, steps().length - 1)]].label}</small></div>
+          <button class="btn btn-primary btn-sm" data-act="resume">متابعة</button>
+          <button class="icon-btn sm plain" data-act="discard" aria-label="حذف المسودة" title="حذف المسودة">${ic('trash')}</button>
+        </div>`;
+    }
+    if (last) {
+      const r = recOf(last);
+      html += `
+        <div class="report home-card" style="--i:2">
+          <div class="report-h">
+            <span class="badge">${ic('note')}</span>
+            <div><b>آخر تقرير</b><small>${esc(dLabel(last).full)} · مُرسَل</small></div>
+          </div>
+          <div class="home-acts">
+            <button class="btn btn-ghost btn-sm" data-act="details">${ic('chevD', S.homeOpen ? 'flip' : '')} ${S.homeOpen ? 'إخفاء التفاصيل' : 'التفاصيل'}</button>
+            <button class="btn btn-soft btn-sm" data-act="edit">${ic('pen')} تعديل</button>
+          </div>
+          ${S.homeOpen ? `<div class="report-b" id="reportBody">${r ? daySummary(r) : '<div class="sk line"></div><div class="sk line short"></div><div class="sk line"></div>'}</div>` : ''}
+        </div>`;
+    } else if (!dr) {
+      html += `
+        <div class="card empty first" style="--i:1">
+          ${ic('note')}
+          <p><b>مرحباً بك في السجل اليومي</b><br>لم ترسل أي تقرير بعد. ابدأ تقريرك الأول.</p>
+        </div>`;
+    }
+    html += `<button class="btn btn-primary newbtn" data-act="new" style="--i:3">${ic('plus')} تقرير جديد</button>`;
+    p.innerHTML = html;
+    renderNav();
+    if (last && S.homeOpen && !recOf(last)) loadHomeDetails(last);
+  }
+  async function loadHomeDetails(date) {
+    try {
+      const r = await fetchRecord(date);
+      const b = $('#reportBody'); if (S.view === 'home' && b) b.innerHTML = daySummary(r);
+    } catch (x) {
+      const b = $('#reportBody'); if (b) b.innerHTML = `<p class="muted">${esc(x.message)}</p>`;
+      if (x.code === 'NOT_FOUND') refreshIndex();
+    }
+  }
+
+  /* ───────── الرحلة ───────── */
+  function startJourney(draft, editing) {
+    S.view = 'journey'; S.editing = !!editing; S.draft = draft;
+    const d = parse(draft.date || today()); S.calMonth = [d.getFullYear(), d.getMonth()];
+    renderJourney(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function renderJourney(animate) {
+    const p = $('#panel'); if (!p || !S.draft) return;
+    p.classList.toggle('anim', !!animate);
+    const d = S.draft;
+    const headHtml = `
+      <div class="jhead" style="--i:0">
+        <button class="icon-btn sm plain" data-act="home" aria-label="رجوع للبداية" title="رجوع للبداية">${ic('x')}</button>
+        <h3>${S.editing ? 'تعديل التقرير' : 'تقرير جديد'}</h3>
+        ${d.date ? `<span class="datechip">${ic('cal')} ${esc(dLabel(d.date).full)}</span>` : ''}
+      </div>`;
+    let body;
+    if (d.log.off && d.log.off.on) body = formOff();
+    else {
+      const ss = steps(), i = Math.min(d.step || 0, ss.length - 1), cur = ss[i];
+      const fn = { date: stepDate, att: stepAtt, rec: stepRec, quran: stepQuran, lessons: stepLessons, review: stepReview }[cur];
+      body = `
+        <div class="stepper j" style="--i:1">${ss.map((s, k) => `<button class="stp ${k < i ? 'done' : k === i ? 'on' : ''}" data-act="step-go" data-s="${k}" ${k > i || (S.editing && k === 0) ? 'disabled' : ''}><div class="b"><i></i></div><span>${STEP[s].label}</span></button>`).join('')}</div>
+        ${fn()}`;
+    }
+    p.innerHTML = headHtml + body;
+    renderNav();
+  }
+
+  /* خطوة 1: تاريخ الحصة (تقويم مضمّن) */
+  function stepDate() {
+    const d = S.draft;
+    return `
+      <div class="card calcard" style="--i:2">
+        <div class="sec-h"><span class="badge">${ic('cal')}</span><div><b>تاريخ الحصة</b><small>اختر يوم الحصة التي تكتب تقريرها</small></div></div>
+        <div id="calBox">${calHTML()}</div>
+      </div>
+      ${d.date ? `<button class="offlink" data-act="off-on" style="--i:3">${ic('info')} لم تُقدَّم أي حصة في ${esc(dLabel(d.date).full)}</button>` : ''}`;
   }
   function calHTML() {
-    if (!S.calMonth || !S.cls) return '';
+    if (!S.calMonth || !S.cls || !S.draft) return '';
     const [y, m] = S.calMonth, t = today(), ss = cfg().seasonStart, floor = missFloor();
     const first = new Date(y, m, 1), nDays = new Date(y, m + 1, 0).getDate();
     const offset = WEEK.indexOf(first.getDay());
-    const done = new Set(index().dates);
     const tm = parse(t), canNext = y < tm.getFullYear() || (y === tm.getFullYear() && m < tm.getMonth());
     const limit = ss ? parse(ss) : new Date(tm.getFullYear() - 1, tm.getMonth(), 1);
     const canPrev = y > limit.getFullYear() || (y === limit.getFullYear() && m > limit.getMonth());
     let cells = WEEK.map(w => `<span class="wd">${WD_SHORT[w]}</span>`).join('');
     for (let i = 0; i < offset; i++) cells += '<span></span>';
     for (let day = 1; day <= nDays; day++) {
-      const s = y + '-' + pad(m + 1) + '-' + pad(day), ok = dateOk(s), h = isTeach(s) && holiday(s);
-      const mark = ok ? (done.has(s) ? 'rec' : (s < t && s >= floor ? 'miss' : '')) : '';
-      const cls = ['cd', isTeach(s) && !h ? 'teach' : '', h ? 'hol' : '', ok ? '' : 'off', s === S.date ? 'sel' : '', s === t ? 'today' : '', mark].join(' ');
-      cells += `<button class="${cls}" data-act="cal-pick" data-d="${s}" ${ok ? '' : 'tabindex="-1"'}${h ? ` title="${esc(h.reason)}"` : ''}>${day}</button>`;
+      const s = y + '-' + pad(m + 1) + '-' + pad(day), ok = dateOk(s), h = isTeach(s) && holiday(s), sent = ok && isSent(s);
+      const mark = sent ? 'rec' : (ok && s < t && s >= floor ? 'miss' : '');
+      const can = ok && !sent;
+      const cls = ['cd', isTeach(s) && !h ? 'teach' : '', h ? 'hol' : '', ok ? '' : 'off', sent ? 'sent' : '', s === S.draft.date ? 'sel' : '', s === t ? 'today' : '', mark].join(' ');
+      const title = h ? h.reason : sent ? 'مُرسَل — يُعدَّل من صفحة البداية' : '';
+      cells += `<button class="${cls}" data-act="pick-date" data-d="${s}" ${can ? '' : 'disabled tabindex="-1"'}${title ? ` title="${esc(title)}"` : ''}>${day}</button>`;
     }
     return `
-      <div class="sheet-h"><b>اختر تاريخ الحصة</b><button class="icon-btn sm plain" data-act="sheet-close" aria-label="إغلاق">${ic('x')}</button></div>
-      <p class="cal-hint">اختر اليوم الذي دُرِّست فيه الحصة التي تكتب تقريرها</p>
       <div class="cal">
         <div class="cal-nav">
           <button class="icon-btn sm plain" data-act="cal-month" data-dir="-1" ${canPrev ? '' : 'disabled'} aria-label="الشهر السابق">${ic('chevR')}</button>
@@ -430,74 +502,30 @@
           <button class="icon-btn sm plain" data-act="cal-month" data-dir="1" ${canNext ? '' : 'disabled'} aria-label="الشهر التالي">${ic('chevL')}</button>
         </div>
         <div class="cal-grid">${cells}</div>
-        <div class="cal-legend"><span><i class="l2"></i>مُرسَل</span><span><i class="l4"></i>غير مُرسَل</span><span><i class="l5"></i>عطلة</span><span><i class="l3"></i>اليوم</span></div>
+        <div class="cal-legend"><span><i class="l4"></i>غير مُرسَل</span><span><i class="l2"></i>مُرسَل</span><span><i class="l5"></i>عطلة</span><span><i class="l3"></i>اليوم</span></div>
       </div>`;
   }
 
-  /* تغيير التاريخ فوري: لا اتصال بالخادم */
-  function loadDay() {
-    S.draft = buildDraft();
-    renderDateBtn();
-    renderPanel(true);
-    if (S.pendingEdit) { S.pendingEdit = false; if (status() === 'last') startEdit(); }
-  }
-
-  function renderPanel(animate) {
-    const p = $('#panel'); if (!p || !S.draft) return;
-    p.classList.toggle('anim', !!animate);
-    const st = status();
-    let body;
-    if (st === 'locked') body = lockedCard();
-    else if (!formOpen()) body = dayCard();
-    else body = journey();
-    p.innerHTML = head() + (S.editing ? editBanner() : '') + body;
-    renderNav();
-    if (st === 'last' && !formOpen() && !recOf()) loadDayCard();
-  }
-
-  function head() {
-    const last = index().last;
-    const btn = last && last !== S.date ? `<button class="lastchip" data-act="go-last">${ic('pen')} تعديل آخر تقرير</button>` : '';
-    return `<div class="parthead" style="--i:0"><h3>تقرير اليوم</h3><div class="ph-acts">${btn}</div></div>`;
-  }
-  const editBanner = () => `<div class="editbanner" style="--i:0">${ic('pen')}<span>تعديل تقرير ${esc(dLabel(S.date).full)}</span><button data-act="cancel-edit">إلغاء</button></div>`;
-
-  function lockedCard() {
-    return `
-      <div class="card state lock" style="--i:1">
-        <div class="big">${ic('lock')}</div>
-        <b>تقرير هذا اليوم مُرسَل ومقفل</b>
-        <p>يمكن تعديل آخر تقرير فقط</p>
-        <div class="acts">
-          <button class="btn btn-soft" data-act="go-last">${ic('pen')} تعديل آخر تقرير</button>
-          <button class="btn btn-ghost" data-act="cal">${ic('cal')} تاريخ آخر</button>
-        </div>
-      </div>`;
-  }
-
-  /* بطاقة تقرير اليوم المرسَل: ملخص الحضور والاستظهار والسجل + قلم للتعديل */
-  function dayCard() {
-    const r = recOf();
-    return `
-      <div class="report" style="--i:1">
-        <div class="report-h">
-          <span class="badge">${ic('note')}</span>
-          <div><b>تقرير اليوم</b><small>${esc(dLabel(S.date).full)} · مُرسَل</small></div>
-          <button class="icon-btn pen" data-act="edit" aria-label="تعديل التقرير" title="تعديل التقرير">${ic('pen')}</button>
-        </div>
-        <div class="report-b" id="reportBody">${r ? daySummary(r) : '<div class="sk line"></div><div class="sk line short"></div><div class="sk line"></div>'}</div>
-      </div>`;
-  }
-  async function loadDayCard() {
-    const date = S.date, cid = S.cls.id;
-    try {
-      const r = await fetchRecord(date);
-      if (S.cls && S.cls.id === cid && S.date === date && !formOpen()) { const b = $('#reportBody'); if (b) b.innerHTML = daySummary(r); }
-    } catch (x) {
-      const b = $('#reportBody'); if (b) b.innerHTML = `<p class="muted">${esc(x.message)}</p>`;
-      if (x.code === 'NOT_FOUND') refreshIndex();
+  /* شريط ثابت أسفل الشاشة: السابق / التالي / إرسال */
+  function renderNav() {
+    const slot = $('#navSlot'); if (!slot) return;
+    if (S.view !== 'journey' || !S.draft) { slot.innerHTML = ''; return; }
+    const d = S.draft, editing = S.editing;
+    if (d.log.off && d.log.off.on) {
+      slot.innerHTML = `<nav class="jbar"><button class="btn btn-ghost" data-act="off-off">${ic('prev')} رجوع</button>
+        <button class="btn btn-primary" data-act="send"><span>${ic(editing ? 'check' : 'send')}</span><span>${editing ? 'حفظ التعديل' : 'إرسال'}</span></button></nav>`;
+      return;
     }
+    const ss = steps(), i = Math.min(d.step || 0, ss.length - 1), last = i === ss.length - 1;
+    const canBack = i > (editing ? 1 : 0);
+    slot.innerHTML = `<nav class="jbar">
+      ${canBack ? `<button class="btn btn-ghost" data-act="step-prev" aria-label="السابق">${ic('prev')}</button>` : ''}
+      ${last ? `<button class="btn btn-primary" data-act="send"><span>${ic(editing ? 'check' : 'send')}</span><span>${editing ? 'حفظ التعديل' : 'إرسال التقرير'}</span></button>`
+             : `<button class="btn btn-primary" data-act="step-next"><span>التالي: ${STEP[ss[i + 1]].label}</span>${ic('next')}</button>`}
+      <span class="jcount">${i + 1}/${ss.length}</span>
+    </nav>`;
   }
+
   const namesBy = (map, pred) => students().filter(s => pred(map[s.id])).map(s => s.name);
   const sec = (title, inner) => `<div class="rsec"><h4>${title}</h4>${inner}</div>`;
   function daySummary(r) {
@@ -513,37 +541,6 @@
     }
     out += sec('السجل اليومي', logRows(r.log));
     return out;
-  }
-
-  /* ───────── الرحلة ───────── */
-  function journey() {
-    const d = S.draft;
-    if (d.log.off && d.log.off.on) return formOff();
-    const ss = steps(), i = Math.min(d.step || 0, ss.length - 1), cur = ss[i];
-    const body = { att: stepAtt, rec: stepRec, quran: stepQuran, lessons: stepLessons, review: stepReview }[cur]();
-    return `
-      <div class="stepper j" style="--i:1">${ss.map((s, k) => `<button class="stp ${k < i ? 'done' : k === i ? 'on' : ''}" data-act="step-go" data-s="${k}" ${k > i ? 'disabled' : ''}><div class="b"><i></i></div><span>${STEP[s].label}</span></button>`).join('')}</div>
-      ${body}
-      ${i === 0 ? `<button class="offlink" data-act="off-on" style="--i:7">${ic('info')} لم تُقدَّم أي حصة في هذا اليوم</button>` : ''}`;
-  }
-
-  /* شريط ثابت أسفل الشاشة: السابق / التالي / إرسال */
-  function renderNav() {
-    const slot = $('#navSlot'); if (!slot) return;
-    if (!S.draft || !formOpen()) { slot.innerHTML = ''; return; }
-    const d = S.draft, editing = S.editing;
-    if (d.log.off && d.log.off.on) {
-      slot.innerHTML = `<nav class="jbar"><button class="btn btn-ghost" data-act="off-off">${ic('prev')} رجوع</button>
-        <button class="btn btn-primary" data-act="send"><span>${ic(editing ? 'check' : 'send')}</span><span>${editing ? 'حفظ التعديل' : 'إرسال'}</span></button></nav>`;
-      return;
-    }
-    const ss = steps(), i = Math.min(d.step || 0, ss.length - 1), last = i === ss.length - 1;
-    slot.innerHTML = `<nav class="jbar">
-      ${i > 0 ? `<button class="btn btn-ghost" data-act="step-prev" aria-label="السابق">${ic('prev')}</button>` : ''}
-      ${last ? `<button class="btn btn-primary" data-act="send"><span>${ic(editing ? 'check' : 'send')}</span><span>${editing ? 'حفظ التعديل' : 'إرسال تقرير اليوم'}</span></button>`
-             : `<button class="btn btn-primary" data-act="step-next"><span>التالي: ${STEP[ss[i + 1]].label}</span>${ic('next')}</button>`}
-      <span class="jcount">${i + 1}/${ss.length}</span>
-    </nav>`;
   }
 
   /* المؤشرات المدمجة */
@@ -660,7 +657,7 @@
         <label class="field"><textarea class="inp" data-bind="log.notes" placeholder="أي ملاحظة عن الحصة أو التلاميذ...">${esc(d.log.notes)}</textarea></label>
       </div>
       <div class="report" style="--i:3">
-        <div class="report-h"><span class="badge">${ic('check')}</span><div><b>مراجعة قبل الإرسال</b><small>${esc(dLabel(S.date).full)}</small></div></div>
+        <div class="report-h"><span class="badge">${ic('check')}</span><div><b>مراجعة قبل الإرسال</b><small>${esc(dLabel(S.draft.date).full)}</small></div></div>
         <div class="report-b">${daySummary({ att: d.att, rec: d.rec, log: d.log })}</div>
       </div>`;
   }
@@ -668,7 +665,7 @@
     const o = S.draft.log.off;
     return `
       <div class="card offcard" style="--i:1">
-        <div class="sec-h"><span class="badge">${ic('info')}</span><div><b>لم تُقدَّم أي حصة في هذا اليوم</b><small>${esc(dLabel(S.date).full)}</small></div></div>
+        <div class="sec-h"><span class="badge">${ic('info')}</span><div><b>لم تُقدَّم أي حصة في هذا اليوم</b><small>${esc(dLabel(S.draft.date).full)}</small></div></div>
         <div class="field"><span>السبب</span><div class="chips">${(cfg().lists.off || []).map(r => chip('log.off.reason', r, o.reason === r)).join('')}</div></div>
         <label class="field"><span>ملاحظة</span><textarea class="inp" data-bind="log.off.note" placeholder="اختيارية">${esc(o.note)}</textarea></label>
       </div>`;
@@ -684,6 +681,10 @@
   /* ───────────── التحقق من كل خطوة قبل الانتقال ───────────── */
   function checkStep(step) {
     const d = S.draft;
+    if (step === 'date') {
+      if (!d.date) { toast('اختر تاريخ الحصة من التقويم', 'warn'); return false; }
+      if (!S.editing && !pickable(d.date)) { toast('هذا اليوم غير متاح لتقرير جديد', 'warn'); return false; }
+    }
     if (step === 'att') {
       const left = students().filter(s => !d.att[s.id]).length;
       if (left) { toast(`حدّد حضور كل التلاميذ (بقي ${left})`, 'warn'); return false; }
@@ -706,20 +707,21 @@
     return true;
   }
   function goStep(i) {
-    S.draft.step = Math.max(0, Math.min(i, steps().length - 1));
-    persist(); renderPanel(true);
+    S.draft.step = Math.max(S.editing ? 1 : 0, Math.min(i, steps().length - 1));
+    persist(); renderJourney(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   /* ───────────── الإرسال (عملية واحدة) ───────────── */
   async function send(btn) {
     const d = S.draft, editing = S.editing, off = d.log.off && d.log.off.on;
+    if (!checkStep('date')) { goStep(0); return; }
     let payload;
     if (off) {
       if (!d.log.off.reason) return toast('اختر سبب عدم تقديم الحصة', 'warn');
       payload = { noSession: { reason: d.log.off.reason, note: d.log.off.note } };
     } else {
-      for (const s of steps()) if (s !== 'review' && !checkStep(s)) { goStep(steps().indexOf(s)); return; }
+      for (const s of steps()) if (s !== 'review' && s !== 'date' && !checkStep(s)) { goStep(steps().indexOf(s)); return; }
       const q = Object.assign({}, d.log.quran);
       if (S.cls.type === T.MUNAFASA) { q.type = T.MUNAFASA; q.from = q.to = ''; }
       else if (q.type === T.TALQIN) q.notes = ''; else { q.from = q.to = ''; }
@@ -731,38 +733,35 @@
     }
     setBusy(btn, true);
     try {
-      const res = await call('saveDay', Object.assign({ classId: S.cls.id, date: S.date }, payload));
+      const res = await call('saveDay', Object.assign({ classId: S.cls.id, date: d.date }, payload));
       if (res && res.index) S.cls.index.log = res.index;
       LS.set('session', S.session);
-      S.recs[dayKey()] = off ? { att: {}, rec: {}, log: logFrom({ off: Object.assign({ on: true }, payload.noSession) }) }
-                             : { att: clone(d.att), rec: clone(payload.rec.reduce((o, x) => (o[x.id] = x.done, o), {})), log: logFrom(clone(payload.log)) };
-      S.editing = false;
-      S.draft = freshDay();
-      persist(true);
-      renderPanel(true);
+      S.recs[S.cls.id + '|' + d.date] = off ? { att: {}, rec: {}, log: logFrom({ off: Object.assign({ on: true }, payload.noSession) }) }
+        : { att: clone(d.att), rec: payload.rec.reduce((o, x) => (o[x.id] = x.done, o), {}), log: logFrom(clone(payload.log)) };
+      dropDraft();
+      S.homeOpen = false;
+      renderHome(true);
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      toast(editing ? 'تم حفظ التعديل' : (off ? 'تم تسجيل أن الحصة لم تُقدَّم' : 'تم إرسال تقرير اليوم'), 'ok');
+      toast(editing ? 'تم حفظ التعديل' : (off ? 'تم تسجيل أن الحصة لم تُقدَّم' : 'تم إرسال التقرير'), 'ok');
     } catch (x) { setBusy(btn, false); toast(x.message, 'bad'); if (x.code === 'LOCKED') refreshIndex(); }
   }
 
-  /* فتح آخر تقرير للتعديل */
+  /* تعديل آخر تقرير: تبدأ الرحلة من الحضور (التاريخ ثابت) */
   async function startEdit(btn) {
-    let r = recOf();
+    const last = index().last; if (!last) return;
+    let r = recOf(last);
     if (!r) {
       setBusy(btn, true);
-      try { r = await fetchRecord(S.date); }
+      try { r = await fetchRecord(last); }
       catch (x) { setBusy(btn, false); toast(x.message, 'bad'); if (x.code === 'NOT_FOUND') refreshIndex(); return; }
     }
-    S.editing = true;
-    S.draft = Object.assign(freshDay(), { att: clone(r.att), rec: clone(r.rec), log: clone(r.log) });
-    renderPanel(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    startJourney(Object.assign({ date: last, att: clone(r.att), rec: clone(r.rec), log: clone(r.log), step: 1, dirty: false }), true);
   }
 
-  function changeDate(d, edit) {
-    closeSheet(); persist(true);
-    S.pendingEdit = !!edit;
-    S.date = d; saveUI(); loadDay();
+  function goHome() {
+    persist(true);                               // المسودة تبقى للمتابعة لاحقاً
+    if (S.editing && S.draft && !S.draft.dirty) dropDraft();
+    renderHome(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -770,7 +769,7 @@
     if (!silent && !confirm('تسجيل الخروج من هذا الجهاز؟')) return;
     LS.keys('draft.').forEach(k => LS.del(k));
     LS.del('session'); LS.del('ui');
-    Object.assign(S, { session: null, cls: null, draft: null, editing: false, recs: {} });
+    Object.assign(S, { session: null, cls: null, draft: null, editing: false, recs: {}, view: 'home' });
     renderLogin();
     if (msg) toast(msg, 'warn');
   }
@@ -784,31 +783,35 @@
       case 'install': return install();
       case 'sheet-close': return closeSheet();
       case 'logout': return logout(false);
-      case 'picker': return renderPicker();
+      case 'picker': if (S.view === 'journey') persist(true); return renderPicker();
       case 'pick': return openClass(b.dataset.id);
-      case 'cal': return openCal();
-      case 'cal-month': {
-        const [y, m] = S.calMonth, d = new Date(y, m + Number(b.dataset.dir), 1);
-        S.calMonth = [d.getFullYear(), d.getMonth()];
-        const box = $('#calBox'); if (box) box.innerHTML = calHTML();
-        return;
-      }
-      case 'cal-pick': return changeDate(b.dataset.d);
       case 'eye': {
         const inp = $('#code'), show = inp.type === 'password';
         inp.type = show ? 'text' : 'password'; b.innerHTML = ic(show ? 'eyeOff' : 'eye'); return;
       }
+      /* صفحة البداية */
+      case 'new': {
+        const dr = savedDraft();
+        if (dr && !confirm('لديك تقرير غير مكتمل. حذفه والبدء من جديد؟')) return;
+        dropDraft();
+        return startJourney(Object.assign({}, { date: '', att: {}, rec: {}, log: freshLog(), step: 0, dirty: false }), false);
+      }
+      case 'resume': { const dr = savedDraft(); if (dr) startJourney(Object.assign({ step: 0 }, dr, { log: Object.assign(freshLog(), dr.log) }), !!dr.editing); return; }
+      case 'discard': { if (!confirm('حذف التقرير غير المكتمل؟')) return; dropDraft(); return renderHome(false); }
+      case 'details': { S.homeOpen = !S.homeOpen; return renderHome(false); }
+      case 'edit': return startEdit(b);
+      case 'home': return goHome();
     }
-    if (!S.draft) return;
+    if (S.view !== 'journey' || !S.draft) return;
     const d = S.draft;
     switch (act) {
-      case 'go-last': return changeDate(index().last, true);
-      case 'edit': return startEdit(b);
-      case 'cancel-edit': {
-        if (d.dirty && !confirm('إلغاء التعديلات غير المحفوظة؟')) return;
-        S.editing = false; S.draft = freshDay(); persist(true);
-        return renderPanel(true);
+      case 'cal-month': {
+        const [y, m] = S.calMonth, nd = new Date(y, m + Number(b.dataset.dir), 1);
+        S.calMonth = [nd.getFullYear(), nd.getMonth()];
+        const box = $('#calBox'); if (box) box.innerHTML = calHTML();
+        return;
       }
+      case 'pick-date': { d.date = b.dataset.d; markDirty(); return renderJourney(false); }
       case 'step-next': {
         const ss = steps(), i = Math.min(d.step || 0, ss.length - 1);
         if (!checkStep(ss[i])) return;
@@ -818,9 +821,10 @@
       case 'step-go': return goStep(+b.dataset.s);
       case 'send': return send(b);
       case 'off-on': case 'off-off': {
+        if (act === 'off-on' && !checkStep('date')) return;
         d.log.off = d.log.off || freshOff();
         d.log.off.on = act === 'off-on';
-        markDirty(); renderPanel(true);
+        markDirty(); renderJourney(true);
         return window.scrollTo({ top: 0, behavior: 'smooth' });
       }
       case 'att': {
@@ -833,7 +837,7 @@
       case 'att-all': {
         const v = cfg().lists.attendance[0];
         students().forEach(s => { if (!d.att[s.id]) d.att[s.id] = v; });
-        markDirty(); return renderPanel(false);
+        markDirty(); return renderJourney(false);
       }
       case 'rec': {
         const id = b.parentElement.dataset.id, v = b.dataset.v === '1';
@@ -844,7 +848,7 @@
       }
       case 'rec-all': {
         recPresent().forEach(s => { if (typeof d.rec[s.id] !== 'boolean') d.rec[s.id] = true; });
-        markDirty(); return renderPanel(false);
+        markDirty(); return renderJourney(false);
       }
       case 'chip': {
         const path = b.dataset.path, v = b.dataset.v;
@@ -855,7 +859,7 @@
         } else {
           const nv = getPath(d, path) === v ? '' : v;
           setPath(d, path, nv);
-          if (b.dataset.rr) { markDirty(); return renderPanel(false); }
+          if (b.dataset.rr) { markDirty(); return renderJourney(false); }
           $$('.chip', b.parentElement).forEach(x => x.classList.toggle('on', x === b && !!nv));
           const card = b.closest('.card'), sub = card && $('.sec-h small', card);
           if (sub && /subject$/.test(path)) sub.textContent = nv || 'اختر المادة';
@@ -864,7 +868,7 @@
       }
       case 'add-lesson': {
         if (d.log.lessons.length < MAX_LESSONS) d.log.lessons.push(emptyLesson());
-        markDirty(); renderPanel(false);
+        markDirty(); renderJourney(false);
         const cards = $$('#panel .card'), lastCard = cards[cards.length - 1];
         if (lastCard) window.scrollTo({ top: window.scrollY + lastCard.getBoundingClientRect().top - 12, behavior: 'smooth' });
         return;
@@ -872,7 +876,7 @@
       case 'del-lesson': {
         if (!confirm('حذف هذه الحصة؟')) return;
         d.log.lessons.splice(+b.dataset.i, 1);
-        markDirty(); return renderPanel(false);
+        markDirty(); return renderJourney(false);
       }
     }
   });
@@ -899,13 +903,13 @@
     const fresh = s && s.code && s.config && ('today' in s.config) && s.classes && s.classes.every(c => c.index && c.index.log && !c.index.att);
     if (!fresh) { if (s && s.code) return relogin(s.code); return renderLogin(); }
     S.session = s;
+    cleanupDrafts();
     const ui = LS.get('ui', {});
     const only = s.classes.length === 1 ? s.classes[0].id : null;
     const target = s.classes.some(c => c.id === ui.classId) ? ui.classId : only;
-    target ? openClass(target, ui.date) : renderPicker();
-    login(s.code).then(cleanupDrafts).catch(x => { if (x.code === 'BAD_CODE') logout(true, 'تغيّر رمز الدخول، أعد الدخول'); });
+    target ? openClass(target) : renderPicker();                    // صفحة البداية دائماً بعد الدخول
+    login(s.code).catch(x => { if (x.code === 'BAD_CODE') logout(true, 'تغيّر رمز الدخول، أعد الدخول'); });
   }
-  /* جلسة من إصدار سابق: دخول صامت بالرمز المحفوظ (مع مسح مسودات الإصدار السابق) */
   function relogin(code) {
     renderLogin();
     LS.keys('draft.').forEach(k => LS.del(k));
