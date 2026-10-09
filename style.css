@@ -459,3 +459,10 @@ textarea.inp { min-height: 110px; resize: vertical; }
 .nudge small { color: var(--muted); font-size: .8rem; }
 .nudge .badge { width: 36px; height: 36px; border-radius: 11px; background: linear-gradient(135deg, #F07186, var(--bad)); }
 .nudge .badge .ic { width: 18px; height: 18px; }
+.cd.half::after { content: ""; position: absolute; bottom: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+.cd.sel.half::after { background: #fff; }
+.cal-legend .l6 { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+/* اليوم المختار: تبقى النقطة بلونها مع إطار أبيض */
+.cd.sel.rec::after { background: #34D399; box-shadow: 0 0 0 2px #fff; }
+.cd.sel.half::after { background: #FBBF24; box-shadow: 0 0 0 2px #fff; }
+.cd.sel.miss::after { background: #F87171; box-shadow: 0 0 0 2px #fff; }

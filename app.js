@@ -109,16 +109,19 @@
     const ss = cfg().seasonStart; if (ss && s < ss) return false;
     return isTeach(s) && !holiday(s);
   }
-  /* حصص مرّت دون تقرير (لجزء معيّن): يوم دراسة سابق، ليس عطلة، وليس "لم تُقدَّم" */
-  function missingDates(part) {
-    const done = new Set(idx(part).dates), off = new Set(idx('log').off || []);
-    const t = today(), ss = cfg().seasonStart, out = [];
-    const d = parse(t); d.setDate(d.getDate() - 1);
-    const floor = ss || isoOf(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 30));
-    for (let s = isoOf(d); s >= floor; d.setDate(d.getDate() - 1), s = isoOf(d)) {
-      if (dateOk(s) && !done.has(s) && !off.has(s)) out.push(s);
-    }
-    return out;
+  /**
+   * حالة اليوم كاملاً (كل تقارير المعلم لهذا القسم):
+   *   full = مكتمل (كل الأجزاء، أو "لم تُقدَّم حصة") · part = ناقص · none = لا شيء
+   */
+  function dayState(s) {
+    if ((idx('log').off || []).indexOf(s) > -1) return 'full';
+    const n = parts().filter(p => idx(p).dates.indexOf(s) > -1).length;
+    return n === 0 ? 'none' : n === parts().length ? 'full' : 'part';
+  }
+  /* الأيام التي تُعدّ "بدون تقرير": يوم دراسة مضى، ليس عطلة، ضمن الموسم (أو آخر 30 يوماً) */
+  function missFloor() {
+    const ss = cfg().seasonStart; if (ss) return ss;
+    const d = parse(today()); d.setDate(d.getDate() - 30); return isoOf(d);
   }
   function defaultDate() {
     const d = parse(today());
@@ -226,6 +229,7 @@
       S.lastIdx = Date.now();
       S.session.classes.forEach(c => { if (d[c.id]) c.index = d[c.id]; });
       LS.set('session', S.session);
+      S.recs = {};                                    // تقارير قد تكون حُذفت من الشيت: تُجلب من جديد عند الحاجة
       safeRefresh();
     } catch (e) {}
   }
@@ -438,7 +442,7 @@
     const [y, m] = S.calMonth, t = today(), ss = cfg().seasonStart;
     const first = new Date(y, m, 1), nDays = new Date(y, m + 1, 0).getDate();
     const offset = WEEK.indexOf(first.getDay());
-    const rec = new Set(idx(S.tab).dates), miss = new Set(missingDates(S.tab));
+    const floor = missFloor();
     const tm = parse(t), canNext = y < tm.getFullYear() || (y === tm.getFullYear() && m < tm.getMonth());
     const limit = ss ? parse(ss) : new Date(tm.getFullYear() - 1, tm.getMonth(), 1);
     const canPrev = y > limit.getFullYear() || (y === limit.getFullYear() && m > limit.getMonth());
@@ -446,8 +450,9 @@
     for (let i = 0; i < offset; i++) cells += '<span></span>';
     for (let day = 1; day <= nDays; day++) {
       const s = y + '-' + pad(m + 1) + '-' + pad(day), ok = dateOk(s), h = isTeach(s) && holiday(s);
-      const cls = ['cd', isTeach(s) && !h ? 'teach' : '', h ? 'hol' : '', ok ? '' : 'off', s === S.date ? 'sel' : '', s === t ? 'today' : '',
-        rec.has(s) ? 'rec' : '', miss.has(s) ? 'miss' : ''].join(' ');
+      const ds = ok ? dayState(s) : '';
+      const mark = ds === 'full' ? 'rec' : ds === 'part' ? 'half' : (ds === 'none' && s < t && s >= floor ? 'miss' : '');
+      const cls = ['cd', isTeach(s) && !h ? 'teach' : '', h ? 'hol' : '', ok ? '' : 'off', s === S.date ? 'sel' : '', s === t ? 'today' : '', mark].join(' ');
       cells += `<button class="${cls}" data-act="cal-pick" data-d="${s}" ${ok ? '' : 'tabindex="-1"'}${h ? ` title="${esc(h.reason)}"` : ''}>${day}</button>`;
     }
     return `
@@ -460,7 +465,7 @@
           <button class="icon-btn sm plain" data-act="cal-month" data-dir="1" ${canNext ? '' : 'disabled'} aria-label="الشهر التالي">${ic('chevL')}</button>
         </div>
         <div class="cal-grid">${cells}</div>
-        <div class="cal-legend"><span><i class="l1"></i>يوم دراسة</span><span><i class="l2"></i>مُسجَّل</span><span><i class="l4"></i>بدون تقرير</span><span><i class="l5"></i>عطلة</span><span><i class="l3"></i>اليوم</span></div>
+        <div class="cal-legend"><span><i class="l2"></i>مكتمل</span><span><i class="l6"></i>ناقص</span><span><i class="l4"></i>بدون تقرير</span><span><i class="l5"></i>عطلة</span><span><i class="l3"></i>اليوم</span></div>
       </div>`;
   }
 
@@ -506,10 +511,9 @@
 
   /* زر "تعديل آخر تقرير" في البداية — بدون تاريخ */
   function partHead(part) {
-    const last = idx(part).last, miss = missingDates(part).length;
+    const last = idx(part).last;
     const btn = last && last !== S.date ? `<button class="lastchip" data-act="go-last" data-p="${part}">${ic('pen')} تعديل آخر تقرير</button>` : '';
-    const warn = miss ? `<button class="misschip" data-act="cal" title="افتح التقويم لرؤيتها">${miss} ${miss === 1 ? 'حصة' : 'حصص'} بدون تقرير</button>` : '';
-    return `<div class="parthead" style="--i:0"><h3>${PART[part]}</h3><div class="ph-acts">${warn}${btn}</div></div>`;
+    return `<div class="parthead" style="--i:0"><h3>${PART[part]}</h3><div class="ph-acts">${btn}</div></div>`;
   }
   const editBanner = part => `<div class="editbanner" style="--i:0">${ic('pen')}<span>تعديل تقرير ${PART[part]} — ${esc(dLabel(S.date).full)}</span><button data-act="cancel-edit" data-p="${part}">إلغاء</button></div>`;
 
@@ -634,7 +638,7 @@
     const o = S.draft.log.off, editing = !!S.edit.log;
     return `
       <div class="card offcard" style="--i:1">
-        <div class="sec-h"><span class="badge">${ic('info')}</span><div><b>لم تُقدَّم الحصة</b><small>${esc(dLabel(S.date).full)}</small></div></div>
+        <div class="sec-h"><span class="badge">${ic('info')}</span><div><b>لم تُقدَّم أي حصة في هذا اليوم</b><small>${esc(dLabel(S.date).full)}</small></div></div>
         <div class="field"><span>السبب</span><div class="chips">${(cfg().lists.off || []).map(r => chip('log.off.reason', r, o.reason === r)).join('')}</div></div>
         <label class="field"><span>ملاحظة</span><textarea class="inp" data-bind="log.off.note" placeholder="اختيارية">${esc(o.note)}</textarea></label>
       </div>
@@ -647,7 +651,9 @@
   function formLog() {
     const L = S.draft.log;
     if (L.off && L.off.on) return formOff();
-    return formLogSteps() + `<button class="offlink" data-act="off-on" style="--i:7">${ic('info')} لم أقدّم حصة في هذا اليوم</button>`;
+    // خيار واحد لليوم كله، يظهر في الخطوة الأولى فقط
+    const first = (L.step || 0) === 0;
+    return formLogSteps() + (first ? `<button class="offlink" data-act="off-on" style="--i:7">${ic('info')} لم تُقدَّم أي حصة في هذا اليوم</button>` : '');
   }
   function formLogSteps() {
     const steps = logSteps(), L = S.draft.log;
