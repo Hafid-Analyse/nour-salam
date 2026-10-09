@@ -103,10 +103,22 @@
     return { wd: s === today() ? 'اليوم' : WD.format(d), short: d.getDate() + '/' + (d.getMonth() + 1), full: WD.format(d) + ' ' + d.getDate() + '/' + (d.getMonth() + 1) + '/' + d.getFullYear() };
   }
   const isTeach = s => { const days = (S.cls && S.cls.days) || []; return !days.length || days.indexOf(parse(s).getDay()) > -1; };
+  const holiday = s => (cfg().holidays || []).find(h => s >= h.from && s <= h.to);
   function dateOk(s) {
     if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s) || s > today()) return false;
     const ss = cfg().seasonStart; if (ss && s < ss) return false;
-    return isTeach(s);
+    return isTeach(s) && !holiday(s);
+  }
+  /* حصص مرّت دون تقرير (لجزء معيّن): يوم دراسة سابق، ليس عطلة، وليس "لم تُقدَّم" */
+  function missingDates(part) {
+    const done = new Set(idx(part).dates), off = new Set(idx('log').off || []);
+    const t = today(), ss = cfg().seasonStart, out = [];
+    const d = parse(t); d.setDate(d.getDate() - 1);
+    const floor = ss || isoOf(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 30));
+    for (let s = isoOf(d); s >= floor; d.setDate(d.getDate() - 1), s = isoOf(d)) {
+      if (dateOk(s) && !done.has(s) && !off.has(s)) out.push(s);
+    }
+    return out;
   }
   function defaultDate() {
     const d = parse(today());
@@ -227,14 +239,16 @@
 
   /* ───────────── المسودات والتقارير ───────────── */
   const emptyLesson = () => ({ subject: '', lesson: '', strategies: [], tools: [], tasks: [] });
-  const freshLog = () => ({ quran: { type: '', from: '', to: '', notes: '' }, lessons: [emptyLesson()], notes: '', step: 0 });
+  const freshOff = () => ({ on: false, reason: '', note: '' });
+  const freshLog = () => ({ quran: { type: '', from: '', to: '', notes: '' }, lessons: [emptyLesson()], notes: '', step: 0, off: freshOff() });
   function logFrom(l) {
     if (!l) return freshLog();
-    const q = l.quran || {};
+    const q = l.quran || {}, o = l.off || {};
     return {
       quran: { type: str(q.type), from: str(q.from), to: str(q.to), notes: str(q.notes) },
       lessons: (l.lessons && l.lessons.length ? l.lessons : [{}]).map(x => ({ subject: str(x.subject), lesson: str(x.lesson), strategies: (x.strategies || []).slice(), tools: (x.tools || []).slice(), tasks: (x.tasks || []).slice() })),
-      notes: str(l.notes), step: 0
+      notes: str(l.notes), step: 0,
+      off: { on: !!o.on, reason: str(o.reason), note: str(o.note) }
     };
   }
   const emptyOf = p => (p === 'log' ? freshLog() : {});
@@ -424,16 +438,17 @@
     const [y, m] = S.calMonth, t = today(), ss = cfg().seasonStart;
     const first = new Date(y, m, 1), nDays = new Date(y, m + 1, 0).getDate();
     const offset = WEEK.indexOf(first.getDay());
-    const rec = new Set(idx(S.tab).dates);
+    const rec = new Set(idx(S.tab).dates), miss = new Set(missingDates(S.tab));
     const tm = parse(t), canNext = y < tm.getFullYear() || (y === tm.getFullYear() && m < tm.getMonth());
     const limit = ss ? parse(ss) : new Date(tm.getFullYear() - 1, tm.getMonth(), 1);
     const canPrev = y > limit.getFullYear() || (y === limit.getFullYear() && m > limit.getMonth());
     let cells = WEEK.map(w => `<span class="wd">${WD_SHORT[w]}</span>`).join('');
     for (let i = 0; i < offset; i++) cells += '<span></span>';
     for (let day = 1; day <= nDays; day++) {
-      const s = y + '-' + pad(m + 1) + '-' + pad(day), ok = dateOk(s);
-      const cls = ['cd', isTeach(s) ? 'teach' : '', ok ? '' : 'off', s === S.date ? 'sel' : '', s === t ? 'today' : '', rec.has(s) ? 'rec' : ''].join(' ');
-      cells += `<button class="${cls}" data-act="cal-pick" data-d="${s}" ${ok ? '' : 'tabindex="-1"'}>${day}</button>`;
+      const s = y + '-' + pad(m + 1) + '-' + pad(day), ok = dateOk(s), h = isTeach(s) && holiday(s);
+      const cls = ['cd', isTeach(s) && !h ? 'teach' : '', h ? 'hol' : '', ok ? '' : 'off', s === S.date ? 'sel' : '', s === t ? 'today' : '',
+        rec.has(s) ? 'rec' : '', miss.has(s) ? 'miss' : ''].join(' ');
+      cells += `<button class="${cls}" data-act="cal-pick" data-d="${s}" ${ok ? '' : 'tabindex="-1"'}${h ? ` title="${esc(h.reason)}"` : ''}>${day}</button>`;
     }
     return `
       <div class="sheet-h"><b>اختر تاريخ الحصة</b><button class="icon-btn sm plain" data-act="sheet-close" aria-label="إغلاق">${ic('x')}</button></div>
@@ -445,7 +460,7 @@
           <button class="icon-btn sm plain" data-act="cal-month" data-dir="1" ${canNext ? '' : 'disabled'} aria-label="الشهر التالي">${ic('chevL')}</button>
         </div>
         <div class="cal-grid">${cells}</div>
-        <div class="cal-legend"><span><i class="l1"></i>يوم دراسة</span><span><i class="l2"></i>${esc(PART[S.tab])} مُسجَّل</span><span><i class="l3"></i>اليوم</span></div>
+        <div class="cal-legend"><span><i class="l1"></i>يوم دراسة</span><span><i class="l2"></i>مُسجَّل</span><span><i class="l4"></i>بدون تقرير</span><span><i class="l5"></i>عطلة</span><span><i class="l3"></i>اليوم</span></div>
       </div>`;
   }
 
@@ -475,9 +490,10 @@
 
   /* زر "تعديل آخر تقرير" في البداية — بدون تاريخ */
   function partHead(part) {
-    const last = idx(part).last;
+    const last = idx(part).last, miss = missingDates(part).length;
     const btn = last && last !== S.date ? `<button class="lastchip" data-act="go-last" data-p="${part}">${ic('pen')} تعديل آخر تقرير</button>` : '';
-    return `<div class="parthead" style="--i:0"><h3>${PART[part]}</h3>${btn}</div>`;
+    const warn = miss ? `<button class="misschip" data-act="cal" title="افتح التقويم لرؤيتها">${miss} ${miss === 1 ? 'حصة' : 'حصص'} بدون تقرير</button>` : '';
+    return `<div class="parthead" style="--i:0"><h3>${PART[part]}</h3><div class="ph-acts">${warn}${btn}</div></div>`;
   }
   const editBanner = part => `<div class="editbanner" style="--i:0">${ic('pen')}<span>تعديل تقرير ${PART[part]} — ${esc(dLabel(S.date).full)}</span><button data-act="cancel-edit" data-p="${part}">إلغاء</button></div>`;
 
@@ -597,7 +613,27 @@
 
   /* ───────── السجل اليومي ───────── */
   const logSteps = () => (isMain() ? ['quran', 'lessons', 'notes'] : ['lessons', 'notes']);
+  /* حصة لم تُقدَّم: السبب فقط (لا يبقى اليوم فارغاً) */
+  function formOff() {
+    const o = S.draft.log.off, editing = !!S.edit.log;
+    return `
+      <div class="card offcard" style="--i:1">
+        <div class="sec-h"><span class="badge">${ic('info')}</span><div><b>لم تُقدَّم الحصة</b><small>${esc(dLabel(S.date).full)}</small></div></div>
+        <div class="field"><span>السبب</span><div class="chips">${(cfg().lists.off || []).map(r => chip('log.off.reason', r, o.reason === r)).join('')}</div></div>
+        <label class="field"><span>ملاحظة</span><textarea class="inp" data-bind="log.off.note" placeholder="اختيارية">${esc(o.note)}</textarea></label>
+      </div>
+      <div class="stepnav" style="--i:3">
+        <button class="btn btn-ghost" data-act="off-off">${ic('prev')} رجوع</button>
+        <button class="btn btn-primary" data-act="save-log"><span>${ic(editing ? 'check' : 'send')}</span><span>${editing ? 'حفظ التعديل' : 'إرسال'}</span></button>
+      </div>`;
+  }
+
   function formLog() {
+    const L = S.draft.log;
+    if (L.off && L.off.on) return formOff();
+    return formLogSteps() + `<button class="offlink" data-act="off-on" style="--i:7">${ic('info')} لم أقدّم حصة في هذا اليوم</button>`;
+  }
+  function formLogSteps() {
     const steps = logSteps(), L = S.draft.log;
     const st = Math.min(L.step || 0, steps.length - 1), last = st === steps.length - 1, editing = !!S.edit.log;
     const body = { quran: stepQuran, lessons: stepLessons, notes: stepNotes }[steps[st]]();
@@ -647,6 +683,11 @@
       (L.lessons.length < MAX_LESSONS ? `<button class="btn btn-dashed" style="--i:4;margin-bottom:14px" data-act="add-lesson">${ic('plus')} إضافة الحصة الثانية</button>` : '');
   }
   function logRows(L) {
+    if (L.off && L.off.on) {
+      const r = [['الحصة', 'لم تُقدَّم'], ['السبب', L.off.reason || '—']];
+      if (L.off.note) r.push(['ملاحظة', L.off.note]);
+      return `<ul class="sum">${r.map(x => `<li><b>${x[0]}</b><span>${esc(x[1])}</span></li>`).join('')}</ul>`;
+    }
     const q = L.quran || {}, rows = [];
     if (isMain()) {
       const qt = S.cls.type === T.MUNAFASA ? T.MUNAFASA : q.type;
@@ -726,6 +767,17 @@
 
   async function saveLog(btn) {
     const L = S.draft.log, q = Object.assign({}, L.quran), editing = !!S.edit.log;
+    if (L.off && L.off.on) {
+      if (!L.off.reason) return toast('اختر سبب عدم تقديم الحصة', 'warn');
+      setBusy(btn, true);
+      try {
+        const noSession = { reason: L.off.reason, note: L.off.note };
+        const res = await call('saveLog', { classId: S.cls.id, date: S.date, noSession });
+        afterSave('log', res, logFrom({ off: Object.assign({ on: true }, noSession) }));
+        toast('تم تسجيل أن الحصة لم تُقدَّم', 'ok');
+      } catch (x) { setBusy(btn, false); toast(x.message, 'bad'); if (x.code === 'LOCKED') refreshIndex(); }
+      return;
+    }
     if (S.cls.type === T.MUNAFASA) { q.type = T.MUNAFASA; q.from = q.to = ''; }
     else if (q.type === T.TALQIN) q.notes = '';
     else { q.from = q.to = ''; }
@@ -888,6 +940,12 @@
         return goStep((S.draft.log.step || 0) + 1);
       }
       case 'step-prev': return goStep((S.draft.log.step || 0) - 1);
+      case 'off-on': case 'off-off': {
+        S.draft.log.off = S.draft.log.off || freshOff();
+        S.draft.log.off.on = act === 'off-on';
+        markDirty('log'); renderPanel(true);
+        return window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
       case 'step-go': return goStep(+b.dataset.s);
     }
   });

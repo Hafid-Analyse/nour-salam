@@ -433,3 +433,18 @@ textarea.inp { min-height: 110px; resize: vertical; }
   #app { border-radius: 32px; overflow: clip; box-shadow: var(--shadow-lg); background: var(--bg); min-height: calc(100dvh - 48px); }
   .tabbar, .savebar { --dock: 38px; }
 }
+
+/* ───────── حصص بدون تقرير · العطل · حصة لم تُقدَّم ───────── */
+.ph-acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.misschip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; background: var(--bad-soft); color: var(--bad); font-family: var(--f-ui); font-size: .78rem; font-weight: 600; }
+.misschip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+.cd.miss::after { content: ""; position: absolute; bottom: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--bad); }
+.cd.sel.miss::after { background: #fff; }
+.cd.hol { opacity: .9; color: var(--warn); background: repeating-linear-gradient(135deg, var(--warn-soft) 0 6px, transparent 6px 11px); pointer-events: none; }
+.cal-legend .l4 { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+.cal-legend .l5 { background: repeating-linear-gradient(135deg, var(--warn) 0 2px, transparent 2px 4px); border-radius: 3px; }
+.offlink { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 16px; padding: 11px; border-radius: var(--r-md); border: 1.5px dashed var(--line); color: var(--muted); font-family: var(--f-ui); font-size: .88rem; font-weight: 600; background: transparent; transition: color .2s, border-color .2s; }
+.offlink:active { color: var(--warn); border-color: var(--warn); }
+.offlink .ic { width: 17px; height: 17px; }
+.offcard .badge { background: linear-gradient(135deg, #F2B544, var(--warn)); }
+.offcard .chip.on { background: var(--warn); border-color: var(--warn); box-shadow: 0 6px 14px -8px var(--warn); }
