@@ -513,3 +513,10 @@ textarea.inp { min-height: 110px; resize: vertical; }
 .calcard .sec-h { margin-bottom: 10px; }
 .cd.sent { pointer-events: none; }
 .cd[disabled] { cursor: default; }
+
+/* ───────── الإرسال في الخلفية ───────── */
+.sending { display: inline-flex; align-items: center; gap: 6px; color: var(--p); font-weight: 600; }
+.sending::before { content: ""; width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--p); border-top-color: transparent; animation: spin .7s linear infinite; }
+.pend-note { display: flex; align-items: center; gap: 8px; justify-content: center; margin-top: 12px; color: var(--warn); font-family: var(--f-ui); font-size: .82rem; font-weight: 600; text-align: center; }
+.pend-note .ic { width: 16px; height: 16px; }
+.newbtn[disabled], .home-acts .btn[disabled] { filter: grayscale(.85) opacity(.55); }

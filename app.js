@@ -199,6 +199,7 @@
     const d = await call('login', { code }, false);
     S.session = { code, token: d.token, teacher: d.teacher, classes: d.classes, config: d.config, at: Date.now() };
     S.lastIdx = Date.now();
+    reapplyOutbox();
     LS.set('session', S.session);
     if (S.cls) {
       const c = d.classes.find(x => x.id === S.cls.id);
@@ -215,11 +216,14 @@
       const d = await call('getIndex');
       S.lastIdx = Date.now();
       S.session.classes.forEach(c => { if (d[c.id]) c.index = d[c.id]; });
-      LS.set('session', S.session);
       S.recs = {};
+      reapplyOutbox();
+      LS.set('session', S.session);
       afterIndexChange();
     } catch (e) {}
   }
+  /* التقارير المعلّقة تبقى ظاهرة كمُرسَلة حتى بعد تحديث الفهرس من الخادم */
+  function reapplyOutbox() { (S.session.classes || []).forEach(c => { const j = LS.get('outbox.' + c.id, null); if (j) applyLocal(j); }); }
   /* إعادة رسم ما يتأثر بالفهرس فقط، دون إزعاج معلم يكتب */
   function afterIndexChange() {
     if (!S.cls) return;
@@ -400,17 +404,18 @@
           <button class="icon-btn sm plain" data-act="discard" aria-label="حذف المسودة" title="حذف المسودة">${ic('trash')}</button>
         </div>`;
     }
+    const pend = pendingFor();
     if (last) {
-      const r = recOf(last);
+      const r = recOf(last), lp = pendingFor(last);
       html += `
         <div class="report home-card" style="--i:2">
           <div class="report-h">
             <span class="badge">${ic('note')}</span>
-            <div><b>آخر تقرير</b><small>${esc(dLabel(last).full)} · مُرسَل</small></div>
+            <div><b>آخر تقرير</b><small>${esc(dLabel(last).full)} · ${lp ? '<span class="sending">جارٍ الإرسال…</span>' : 'مُرسَل'}</small></div>
           </div>
           <div class="home-acts">
             <button class="btn btn-ghost btn-sm" data-act="details">${ic('chevD', S.homeOpen ? 'flip' : '')} ${S.homeOpen ? 'إخفاء التفاصيل' : 'التفاصيل'}</button>
-            <button class="btn btn-soft btn-sm" data-act="edit">${ic('pen')} تعديل</button>
+            <button class="btn btn-soft btn-sm" data-act="edit" ${pend ? 'disabled' : ''}>${ic('pen')} تعديل</button>
           </div>
           ${S.homeOpen ? `<div class="report-b" id="reportBody">${r ? daySummary(r) : '<div class="sk line"></div><div class="sk line short"></div><div class="sk line"></div>'}</div>` : ''}
         </div>`;
@@ -421,7 +426,8 @@
           <p><b>مرحباً بك في السجل اليومي</b><br>لم ترسل أي تقرير بعد. ابدأ تقريرك الأول.</p>
         </div>`;
     }
-    html += `<button class="btn btn-primary newbtn" data-act="new" style="--i:3">${ic('plus')} تقرير جديد</button>`;
+    html += `<button class="btn btn-primary newbtn" data-act="new" style="--i:3" ${pend ? 'disabled' : ''}>${ic('plus')} تقرير جديد</button>`;
+    if (pend && !navigator.onLine) html += `<p class="pend-note">${ic('info')} التقرير محفوظ على الجهاز وسيُرسَل تلقائياً عند عودة الاتصال</p>`;
     p.innerHTML = html;
     renderNav();
     if (last && S.homeOpen && !recOf(last)) loadHomeDetails(last);
@@ -731,20 +737,60 @@
         rec: isMain() ? recPresent().map(s => ({ id: s.id, done: d.rec[s.id] })) : []
       };
     }
-    setBusy(btn, true);
-    try {
-      const res = await call('saveDay', Object.assign({ classId: S.cls.id, date: d.date }, payload));
-      if (res && res.index) S.cls.index.log = res.index;
-      LS.set('session', S.session);
-      S.recs[S.cls.id + '|' + d.date] = off ? { att: {}, rec: {}, log: logFrom({ off: Object.assign({ on: true }, payload.noSession) }) }
-        : { att: clone(d.att), rec: payload.rec.reduce((o, x) => (o[x.id] = x.done, o), {}), log: logFrom(clone(payload.log)) };
-      dropDraft();
-      S.homeOpen = false;
-      renderHome(true);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      toast(editing ? 'تم حفظ التعديل' : (off ? 'تم تسجيل أن الحصة لم تُقدَّم' : 'تم إرسال التقرير'), 'ok');
-    } catch (x) { setBusy(btn, false); toast(x.message, 'bad'); if (x.code === 'LOCKED') refreshIndex(); }
+    // ⚡ إرسال في الخلفية: يُحفظ التقرير في "صندوق الإرسال" ويعود المعلم فوراً لصفحة البداية
+    const job = { cls: S.cls.id, date: d.date, payload, editing, off: !!off, draft: Object.assign(clone(d), { editing, dirty: true }) };
+    LS.set('outbox.' + job.cls, job);
+    applyLocal(job);
+    dropDraft();
+    S.homeOpen = false;
+    renderHome(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    flushOutbox(job.cls);
   }
+
+  /* ───────── صندوق الإرسال (تقرير واحد معلَّق لكل قسم) ───────── */
+  const outbox = cid => LS.get('outbox.' + cid, null);
+  const pendingFor = date => { const o = S.cls && outbox(S.cls.id); return !!o && (!date || o.date === date); };
+  /* تحديث فوري محلي (اليوم يظهر مُرسَلاً) قبل رد الخادم */
+  function applyLocal(job) {
+    const c = S.session.classes.find(x => x.id === job.cls); if (!c) return;
+    const ix = c.index.log;
+    if (ix.dates.indexOf(job.date) < 0) { ix.dates.push(job.date); ix.dates.sort(); }
+    ix.off = (ix.off || []).filter(x => x !== job.date);
+    if (job.off) ix.off.push(job.date);
+    ix.last = job.date;
+    const p = job.payload;
+    S.recs[job.cls + '|' + job.date] = job.off ? { att: {}, rec: {}, log: logFrom({ off: Object.assign({ on: true }, p.noSession) }) }
+      : { att: (p.att || []).reduce((o, x) => (o[x.id] = x.status, o), {}), rec: (p.rec || []).reduce((o, x) => (o[x.id] = x.done, o), {}), log: logFrom(clone(p.log)) };
+    LS.set('session', S.session);
+  }
+  const sending = {};
+  async function flushOutbox(cid) {
+    const job = outbox(cid);
+    if (!job || sending[cid]) return;
+    sending[cid] = true;
+    try {
+      const res = await call('saveDay', Object.assign({ classId: job.cls, date: job.date }, job.payload));
+      const c = S.session.classes.find(x => x.id === job.cls);
+      if (c && res && res.index) c.index.log = res.index;
+      LS.set('session', S.session);
+      LS.del('outbox.' + cid);
+      toast(job.editing ? 'تم حفظ التعديل' : (job.off ? 'تم تسجيل أن الحصة لم تُقدَّم' : 'تم إرسال التقرير'), 'ok');
+    } catch (x) {
+      if (!x.code) {                                   // مشكلة اتصال: يبقى في الصندوق ويُعاد تلقائياً
+        toast('لم يُرسَل بعد — سيُعاد الإرسال تلقائياً عند توفر الاتصال', 'warn');
+      } else {                                         // رفض من الخادم: يعود مسودةً حتى لا يضيع شيء
+        LS.del('outbox.' + cid);
+        LS.set('draft.' + cid, job.draft);
+        toast(x.message, 'bad');
+        refreshIndex();
+      }
+    } finally {
+      sending[cid] = false;
+      if (S.view === 'home' && S.cls && S.cls.id === cid) renderHome(false);
+    }
+  }
+  function flushAll() { if (S.session && S.session.classes) S.session.classes.forEach(c => flushOutbox(c.id)); }
 
   /* تعديل آخر تقرير: تبدأ الرحلة من الحضور (التاريخ ثابت) */
   async function startEdit(btn) {
@@ -766,8 +812,10 @@
   }
 
   function logout(silent, msg) {
-    if (!silent && !confirm('تسجيل الخروج من هذا الجهاز؟')) return;
+    const unsent = LS.keys('outbox.').length;
+    if (!silent && !confirm(unsent ? 'يوجد تقرير لم يُرسَل بعد وسيضيع. تسجيل الخروج رغم ذلك؟' : 'تسجيل الخروج من هذا الجهاز؟')) return;
     LS.keys('draft.').forEach(k => LS.del(k));
+    LS.keys('outbox.').forEach(k => LS.del(k));
     LS.del('session'); LS.del('ui');
     Object.assign(S, { session: null, cls: null, draft: null, editing: false, recs: {}, view: 'home' });
     renderLogin();
@@ -894,7 +942,7 @@
   });
   window.addEventListener('pagehide', () => persist(true));
   window.addEventListener('offline', () => toast('انقطع الاتصال — تغييراتك محفوظة على الجهاز', 'warn'));
-  window.addEventListener('online', () => toast('عاد الاتصال', 'ok'));
+  window.addEventListener('online', () => { toast('عاد الاتصال', 'ok'); flushAll(); });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncChrome);
 
   /* ───────────── الإقلاع ───────────── */
@@ -908,7 +956,7 @@
     const only = s.classes.length === 1 ? s.classes[0].id : null;
     const target = s.classes.some(c => c.id === ui.classId) ? ui.classId : only;
     target ? openClass(target) : renderPicker();                    // صفحة البداية دائماً بعد الدخول
-    login(s.code).catch(x => { if (x.code === 'BAD_CODE') logout(true, 'تغيّر رمز الدخول، أعد الدخول'); });
+    login(s.code).then(flushAll).catch(x => { if (x.code === 'BAD_CODE') logout(true, 'تغيّر رمز الدخول، أعد الدخول'); });
   }
   function relogin(code) {
     renderLogin();
