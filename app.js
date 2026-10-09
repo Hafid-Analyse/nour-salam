@@ -2,9 +2,9 @@
  * ═══════════════════════════════════════════════════════════
  *  السجل اليومي — مدرسة نور السلام القرآنية
  *  الواجهة (GitHub Pages) — تتصل بخادم Apps Script
- *  • التلاميذ وفهرس التقارير يصلان عند الدخول ← تغيير التاريخ فوري
- *  • تقرير جديد = خانات فارغة دائماً · آخر تقرير وحده قابل للتعديل
- *  • حفظ المسودات والجلسة · نهاري/ليلي · تطبيق قابل للتثبيت
+ *  • رحلة واحدة: الحضور ← الاستظهار ← القرآن ← الدروس ← الإرسال
+ *  • يُرسَل اليوم كاملاً مرة واحدة: إما 🟢 مُرسَل أو 🔴 غير مُرسَل
+ *  • آخر تقرير وحده قابل للتعديل · المسودات تُحفظ تلقائياً
  * ═══════════════════════════════════════════════════════════
  */
 (() => {
@@ -13,23 +13,22 @@
   /* ───────────── الثوابت ───────────── */
   const API_URL = (window.APP_CONFIG || {}).API_URL || '';
   const T = { MAIN: 'معلم قسم', TALQIN: 'تلقين', MUNAFASA: 'منافسة' };
-  const TABS = [
-    { id: 'att', label: 'الحضور', icon: 'users' },
-    { id: 'rec', label: 'الاستظهار', icon: 'mic' },
-    { id: 'log', label: 'السجل اليومي', icon: 'note' }
-  ];
-  const PART = { att: 'الحضور', rec: 'الاستظهار', log: 'السجل اليومي' };
-  const PART_IC = { att: 'users', rec: 'mic', log: 'note' };
-  const STEP_LABEL = { quran: 'حصة القرآن', lessons: 'الدروس', notes: 'الإرسال' };
+  const STEP = {
+    att:     { label: 'الحضور',    icon: 'users' },
+    rec:     { label: 'الاستظهار', icon: 'mic' },
+    quran:   { label: 'القرآن',    icon: 'book' },
+    lessons: { label: 'الدروس',    icon: 'note' },
+    review:  { label: 'الإرسال',   icon: 'send' }
+  };
   const ORD = ['الأولى', 'الثانية'];
   const MAX_LESSONS = 2;
   const TONES = ['var(--ok)', 'var(--bad)', 'var(--warn)'];
-  const ATT_IC = ['check', 'x', 'clock'];                    // أيقونة كل حالة حضور حسب ترتيبها في الشيت
-  const WEEK = [6, 0, 1, 2, 3, 4, 5];                        // أعمدة التقويم: السبت ← الجمعة
+  const ATT_IC = ['check', 'x', 'clock'];
+  const WEEK = [6, 0, 1, 2, 3, 4, 5];
   const WD_SHORT = { 0: 'أحد', 1: 'إثنين', 2: 'ثلاثاء', 3: 'أربعاء', 4: 'خميس', 5: 'جمعة', 6: 'سبت' };
 
   const app = document.getElementById('app');
-  const S = { session: null, cls: null, date: null, tab: 'att', draft: null, edit: {}, recs: {}, calMonth: null, pendingEdit: null, lastIdx: 0 };
+  const S = { session: null, cls: null, date: null, draft: null, editing: false, recs: {}, calMonth: null, pendingEdit: false, lastIdx: 0 };
 
   /* ───────────── أدوات ───────────── */
   const LS = {
@@ -44,10 +43,10 @@
   const clone = o => JSON.parse(JSON.stringify(o));
   const cfg = () => S.session.config;
   const isMain = () => !!S.cls && S.cls.role === T.MAIN;
-  const parts = () => (isMain() ? ['att', 'rec', 'log'] : ['log']);
   const dayKey = () => S.cls.id + '|' + S.date;
   const students = () => (S.cls && S.cls.students) || [];
   const str = v => (v == null ? '' : String(v));
+  const absentLabel = () => cfg().lists.attendance[1];
 
   const IC = {
     users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
@@ -109,30 +108,20 @@
     const ss = cfg().seasonStart; if (ss && s < ss) return false;
     return isTeach(s) && !holiday(s);
   }
-  /**
-   * حالة اليوم كاملاً (كل تقارير المعلم لهذا القسم):
-   *   full = مكتمل (كل الأجزاء، أو "لم تُقدَّم حصة") · part = ناقص · none = لا شيء
-   */
-  function dayState(s) {
-    if ((idx('log').off || []).indexOf(s) > -1) return 'full';
-    const n = parts().filter(p => idx(p).dates.indexOf(s) > -1).length;
-    return n === 0 ? 'none' : n === parts().length ? 'full' : 'part';
-  }
-  /* الأيام التي تُعدّ "بدون تقرير": يوم دراسة مضى، ليس عطلة، ضمن الموسم (أو آخر 30 يوماً) */
-  function missFloor() {
-    const ss = cfg().seasonStart; if (ss) return ss;
-    const d = parse(today()); d.setDate(d.getDate() - 30); return isoOf(d);
-  }
   function defaultDate() {
     const d = parse(today());
     for (let i = 0; i < 21; i++) { const s = isoOf(d); if (dateOk(s)) return s; d.setDate(d.getDate() - 1); }
     return today();
   }
+  function missFloor() {
+    const ss = cfg().seasonStart; if (ss) return ss;
+    const d = parse(today()); d.setDate(d.getDate() - 30); return isoOf(d);
+  }
 
-  /* حالة كل جزء لتاريخ معيّن — تُحسب محلياً من الفهرس (بدون اتصال) */
-  const idx = p => (S.cls && S.cls.index && S.cls.index[p]) || { dates: [], last: '' };
-  const status = p => { const i = idx(p); return i.dates.indexOf(S.date) < 0 ? 'new' : (i.last === S.date ? 'last' : 'locked'); };
-  const formOpen = p => status(p) === 'new' || (status(p) === 'last' && !!S.edit[p]);
+  /* حالة اليوم: يحددها التقرير اليومي المرسَل (مرة واحدة لكل الأجزاء) */
+  const index = () => (S.cls && S.cls.index && S.cls.index.log) || { dates: [], off: [], last: '' };
+  const status = () => { const i = index(); return i.dates.indexOf(S.date) < 0 ? 'new' : (i.last === S.date ? 'last' : 'locked'); };
+  const formOpen = () => status() === 'new' || (status() === 'last' && S.editing);
 
   function getPath(o, path) { return path.split('.').reduce((a, k) => (a == null ? a : a[k]), o); }
   function setPath(o, path, v) { const ks = path.split('.'), last = ks.pop(); ks.reduce((a, k) => a[k], o)[last] = v; }
@@ -222,83 +211,75 @@
     return S.session;
   }
 
-  /* تحديث خفيف لفهرس التقارير (يلتقط ما حُذف من الشيت) */
+  /* تحديث خفيف للفهرس (يلتقط ما حُذف أو أُضيف في الشيت) */
   async function refreshIndex() {
     try {
       const d = await call('getIndex');
       S.lastIdx = Date.now();
       S.session.classes.forEach(c => { if (d[c.id]) c.index = d[c.id]; });
       LS.set('session', S.session);
-      S.recs = {};                                    // تقارير قد تكون حُذفت من الشيت: تُجلب من جديد عند الحاجة
+      S.recs = {};
       safeRefresh();
     } catch (e) {}
   }
-  /* إعادة رسم بعد تحديث الفهرس، دون إزعاج معلم يكتب */
   function safeRefresh() {
     const box = $('#calBox'); if (box) box.innerHTML = calHTML();
-    if (!S.cls || !S.draft) return;
-    if (parts().some(p => S.draft.dirty[p] || S.edit[p])) return;
+    if (!S.cls || !S.draft || S.draft.dirty || S.editing) return;
     S.draft = buildDraft(); renderPanel(false);
   }
 
-  /* ───────────── المسودات والتقارير ───────────── */
+  /* ───────────── المسودة: تقرير اليوم كاملاً ───────────── */
   const emptyLesson = () => ({ subject: '', lesson: '', strategies: [], tools: [], tasks: [] });
   const freshOff = () => ({ on: false, reason: '', note: '' });
-  const freshLog = () => ({ quran: { type: '', from: '', to: '', notes: '' }, lessons: [emptyLesson()], notes: '', step: 0, off: freshOff() });
+  const freshLog = () => ({ quran: { type: '', from: '', to: '', notes: '' }, lessons: [emptyLesson()], notes: '', off: freshOff() });
+  const freshDay = () => ({ att: {}, rec: {}, log: freshLog(), step: 0, dirty: false });
   function logFrom(l) {
     if (!l) return freshLog();
     const q = l.quran || {}, o = l.off || {};
     return {
       quran: { type: str(q.type), from: str(q.from), to: str(q.to), notes: str(q.notes) },
       lessons: (l.lessons && l.lessons.length ? l.lessons : [{}]).map(x => ({ subject: str(x.subject), lesson: str(x.lesson), strategies: (x.strategies || []).slice(), tools: (x.tools || []).slice(), tasks: (x.tasks || []).slice() })),
-      notes: str(l.notes), step: 0,
+      notes: str(l.notes),
       off: { on: !!o.on, reason: str(o.reason), note: str(o.note) }
     };
   }
-  const emptyOf = p => (p === 'log' ? freshLog() : {});
+  const steps = () => (isMain() ? ['att', 'rec', 'quran', 'lessons', 'review'] : ['lessons', 'review']);
 
-  /** نقطة البداية دائماً فارغة؛ تُسترجع فقط مسودة لم تُحفظ تخص نفس الحالة */
+  /** تقرير جديد = فارغ دائماً؛ تُسترجع فقط مسودة لم تُرسَل لنفس الحالة */
   function buildDraft() {
     const local = LS.get('draft.' + dayKey(), null);
-    const d = { att: {}, rec: {}, log: freshLog(), dirty: { att: false, rec: false, log: false } };
-    S.edit = {};
-    let restored = false;
-    if (local && local.dirty) {
-      const le = local.edit || {};
-      parts().forEach(p => {
-        const st = status(p);
-        const fits = (st === 'new' && !le[p]) || (st === 'last' && le[p]);
-        if (local.dirty[p] && local[p] && fits) { d[p] = local[p]; d.dirty[p] = true; if (le[p]) S.edit[p] = true; restored = true; }
-      });
+    S.editing = false;
+    const st = status();
+    if (local && local.dirty && local.log && ((st === 'new' && !local.editing) || (st === 'last' && local.editing))) {
+      S.editing = !!local.editing;
+      setTimeout(() => toast('استُرجعت تغييرات لم تُرسَل بعد', 'info'), 300);
+      const d = freshDay();
+      return Object.assign(d, { att: local.att || {}, rec: local.rec || {}, log: Object.assign(freshLog(), local.log), step: local.step || 0, dirty: true });
     }
-    if (local && local.log && !d.dirty.log && status('log') === 'new') d.log.step = local.log.step || 0;
-    if (restored) setTimeout(() => toast('استُرجعت تغييرات لم تُحفظ بعد', 'info'), 300);
-    return d;
+    return freshDay();
   }
   let persistTimer;
   function persist(now) {
     clearTimeout(persistTimer);
     const run = () => {
       if (!S.cls || !S.draft) return;
-      const d = S.draft.dirty;
-      if (d.att || d.rec || d.log || S.draft.log.step) LS.set('draft.' + dayKey(), Object.assign({}, S.draft, { edit: S.edit }));
+      if (S.draft.dirty) LS.set('draft.' + dayKey(), Object.assign({}, S.draft, { editing: S.editing }));
       else LS.del('draft.' + dayKey());
     };
     now ? run() : (persistTimer = setTimeout(run, 250));
   }
-  function markDirty(part) { S.draft.dirty[part] = true; persist(); renderSaveFab(); }
+  function markDirty() { S.draft.dirty = true; persist(); }
   function cleanupDrafts() { const t = today(); LS.keys('draft.').forEach(k => { const d = k.split('|')[1]; if (!d || d > t) LS.del(k); }); }
-  function saveUI() { LS.set('ui', { classId: S.cls && S.cls.id, date: S.date, tab: S.tab }); }
+  function saveUI() { LS.set('ui', { classId: S.cls && S.cls.id, date: S.date }); }
 
-  /** جلب تقرير مسجَّل (للعرض أو التعديل) مع ذاكرة محلية */
-  async function fetchRecord(part, date) {
-    const key = S.cls.id + '|' + part + '|' + date;
+  async function fetchRecord(date) {
+    const key = S.cls.id + '|' + date;
     if (S.recs[key]) return S.recs[key];
-    const r = await call('getRecord', { classId: S.cls.id, date, part });
-    S.recs[key] = { data: part === 'log' ? logFrom(r.data) : (r.data || {}) };
+    const r = await call('getRecord', { classId: S.cls.id, date });
+    S.recs[key] = { att: r.att || {}, rec: r.rec || {}, log: logFrom(r.log) };
     return S.recs[key];
   }
-  const recOf = part => S.recs[S.cls.id + '|' + part + '|' + S.date];
+  const recOf = () => S.recs[dayKey()];
 
   /* ═════════════ الشاشات ═════════════ */
 
@@ -333,7 +314,6 @@
     syncChrome();
     $('#loginForm').addEventListener('submit', onLogin);
   }
-
   async function onLogin(e) {
     e.preventDefault();
     const inp = $('#code'), code = inp.value.trim(), btn = $('.btn-cta'), err = $('#loginErr');
@@ -384,19 +364,17 @@
   }
 
   /* ③ الشاشة الرئيسية */
-  function openClass(id, date, tab) {
+  function openClass(id, date) {
     const c = S.session.classes.find(x => x.id === id);
     if (!c) return renderPicker();
     S.cls = c;
     S.date = dateOk(date) ? date : defaultDate();
-    S.tab = isMain() ? (TABS.some(t => t.id === tab) ? tab : 'att') : 'log';
     saveUI(); renderMain(); loadDay();
   }
-
   function renderMain() {
-    const c = S.cls, many = S.session.classes.length > 1, main = isMain();
+    const c = S.cls, many = S.session.classes.length > 1;
     app.innerHTML = `
-      <section class="screen ${main ? '' : 'no-tabs'}" id="mainScreen">
+      <section class="screen" id="mainScreen">
         <header class="bar">
           <div class="bar-top">
             ${many ? `<button class="icon-btn glass" data-act="picker" title="تغيير القسم">${ic('grid')}</button>` : ''}
@@ -409,40 +387,28 @@
           </div>
         </header>
         <main class="panel" id="panel"></main>
-        <div id="saveSlot"></div>
-        ${main ? `
-        <nav class="tabbar" id="tabbar">
-          <span class="ind"></span>
-          ${TABS.map(t => `<button class="tab" data-act="tab" data-t="${t.id}">${ic(t.icon)}<span>${t.label}</span><i class="tdot"></i></button>`).join('')}
-        </nav>` : ''}
+        <div id="navSlot"></div>
       </section>`;
-    syncChrome(); renderDateBtn(); syncTabs();
+    syncChrome(); renderDateBtn();
   }
-
   function renderDateBtn() {
     const b = $('#datebtn'); if (!b) return;
     const l = dLabel(S.date);
     b.innerHTML = `<small>تاريخ الحصة</small><span>${ic('cal')}<b>${l.wd}</b> ${l.short}</span>`;
   }
-  function syncTabs() {
-    const bar = $('#tabbar'); if (!bar) return;
-    const i = TABS.findIndex(t => t.id === S.tab);
-    $('.ind', bar).style.transform = `translateX(${-100 * i}%)`;
-    $$('.tab', bar).forEach(b => b.classList.toggle('on', b.dataset.t === S.tab));
-  }
 
-  /* ───────── التقويم ───────── */
+  /* ───────── التقويم: 🟢 مُرسَل · 🔴 غير مُرسَل ───────── */
   function openCal() {
     const d = parse(S.date); S.calMonth = [d.getFullYear(), d.getMonth()];
     openSheet(`<div id="calBox">${calHTML()}</div>`);
-    refreshIndex();                                           // تحديث النقاط في الخلفية
+    refreshIndex();
   }
   function calHTML() {
     if (!S.calMonth || !S.cls) return '';
-    const [y, m] = S.calMonth, t = today(), ss = cfg().seasonStart;
+    const [y, m] = S.calMonth, t = today(), ss = cfg().seasonStart, floor = missFloor();
     const first = new Date(y, m, 1), nDays = new Date(y, m + 1, 0).getDate();
     const offset = WEEK.indexOf(first.getDay());
-    const floor = missFloor();
+    const done = new Set(index().dates);
     const tm = parse(t), canNext = y < tm.getFullYear() || (y === tm.getFullYear() && m < tm.getMonth());
     const limit = ss ? parse(ss) : new Date(tm.getFullYear() - 1, tm.getMonth(), 1);
     const canPrev = y > limit.getFullYear() || (y === limit.getFullYear() && m > limit.getMonth());
@@ -450,8 +416,7 @@
     for (let i = 0; i < offset; i++) cells += '<span></span>';
     for (let day = 1; day <= nDays; day++) {
       const s = y + '-' + pad(m + 1) + '-' + pad(day), ok = dateOk(s), h = isTeach(s) && holiday(s);
-      const ds = ok ? dayState(s) : '';
-      const mark = ds === 'full' ? 'rec' : ds === 'part' ? 'half' : (ds === 'none' && s < t && s >= floor ? 'miss' : '');
+      const mark = ok ? (done.has(s) ? 'rec' : (s < t && s >= floor ? 'miss' : '')) : '';
       const cls = ['cd', isTeach(s) && !h ? 'teach' : '', h ? 'hol' : '', ok ? '' : 'off', s === S.date ? 'sel' : '', s === t ? 'today' : '', mark].join(' ');
       cells += `<button class="${cls}" data-act="cal-pick" data-d="${s}" ${ok ? '' : 'tabindex="-1"'}${h ? ` title="${esc(h.reason)}"` : ''}>${day}</button>`;
     }
@@ -465,7 +430,7 @@
           <button class="icon-btn sm plain" data-act="cal-month" data-dir="1" ${canNext ? '' : 'disabled'} aria-label="الشهر التالي">${ic('chevL')}</button>
         </div>
         <div class="cal-grid">${cells}</div>
-        <div class="cal-legend"><span><i class="l2"></i>مكتمل</span><span><i class="l6"></i>ناقص</span><span><i class="l4"></i>بدون تقرير</span><span><i class="l5"></i>عطلة</span><span><i class="l3"></i>اليوم</span></div>
+        <div class="cal-legend"><span><i class="l2"></i>مُرسَل</span><span><i class="l4"></i>غير مُرسَل</span><span><i class="l5"></i>عطلة</span><span><i class="l3"></i>اليوم</span></div>
       </div>`;
   }
 
@@ -474,102 +439,114 @@
     S.draft = buildDraft();
     renderDateBtn();
     renderPanel(true);
-    if (S.pendingEdit) {
-      const p = S.pendingEdit; S.pendingEdit = null;
-      if (status(p) === 'last') startEdit(p);
-    }
+    if (S.pendingEdit) { S.pendingEdit = false; if (status() === 'last') startEdit(); }
   }
 
   function renderPanel(animate) {
     const p = $('#panel'); if (!p || !S.draft) return;
     p.classList.toggle('anim', !!animate);
-    const part = S.tab, st = status(part);
+    const st = status();
     let body;
-    if (st === 'locked') body = stateLocked(part);
-    else if (!formOpen(part)) body = reportCard(part);
-    else body = part === 'att' ? formAtt() : part === 'rec' ? formRec() : formLog();
-    p.innerHTML = partHead(part) + (S.edit[part] ? editBanner(part) : '') + logNudge(part) + body;
-    renderSaveFab();
-    syncTabDots();
-    if (st === 'last' && !formOpen(part) && !recOf(part)) loadReportBody(part);
+    if (st === 'locked') body = lockedCard();
+    else if (!formOpen()) body = dayCard();
+    else body = journey();
+    p.innerHTML = head() + (S.editing ? editBanner() : '') + body;
+    renderNav();
+    if (st === 'last' && !formOpen() && !recOf()) loadDayCard();
   }
 
-  /* تذكير السجل اليومي: الحضور أو الاستظهار مسجَّل لكن تقرير الدرس لهذا اليوم ناقص */
-  const logMissingToday = () => isMain() && status('log') === 'new';
-  function logNudge(part) {
-    if (part === 'log' || !logMissingToday() || formOpen(part) || status(part) !== 'last') return '';
-    return `<div class="nudge" style="--i:1">
-      <span class="badge">${ic('note')}</span>
-      <div><b>بقي السجل اليومي لهذا اليوم</b><small>لم يُكتب تقرير الدرس بعد</small></div>
-      <button class="btn btn-primary btn-sm" data-act="tab" data-t="log">اكتبه الآن</button>
-    </div>`;
+  function head() {
+    const last = index().last;
+    const btn = last && last !== S.date ? `<button class="lastchip" data-act="go-last">${ic('pen')} تعديل آخر تقرير</button>` : '';
+    return `<div class="parthead" style="--i:0"><h3>تقرير اليوم</h3><div class="ph-acts">${btn}</div></div>`;
   }
-  /* نقطة حمراء على تبويب السجل اليومي عندما يكون ناقصاً للتاريخ المختار */
-  function syncTabDots() {
-    const b = $('.tab[data-t="log"]'); if (b) b.classList.toggle('dot', logMissingToday());
-  }
+  const editBanner = () => `<div class="editbanner" style="--i:0">${ic('pen')}<span>تعديل تقرير ${esc(dLabel(S.date).full)}</span><button data-act="cancel-edit">إلغاء</button></div>`;
 
-  /* زر "تعديل آخر تقرير" في البداية — بدون تاريخ */
-  function partHead(part) {
-    const last = idx(part).last;
-    const btn = last && last !== S.date ? `<button class="lastchip" data-act="go-last" data-p="${part}">${ic('pen')} تعديل آخر تقرير</button>` : '';
-    return `<div class="parthead" style="--i:0"><h3>${PART[part]}</h3><div class="ph-acts">${btn}</div></div>`;
-  }
-  const editBanner = part => `<div class="editbanner" style="--i:0">${ic('pen')}<span>تعديل تقرير ${PART[part]} — ${esc(dLabel(S.date).full)}</span><button data-act="cancel-edit" data-p="${part}">إلغاء</button></div>`;
-
-  /* بطاقة التقرير المسجَّل: مستطيلة + قلم للتعديل */
-  function reportCard(part) {
-    const r = recOf(part);
-    return `
-      <div class="report" style="--i:1">
-        <div class="report-h">
-          <span class="badge">${ic(PART_IC[part])}</span>
-          <div><b>تقرير ${PART[part]}</b><small>${esc(dLabel(S.date).full)} · مُرسَل</small></div>
-          <button class="icon-btn pen" data-act="edit" data-p="${part}" aria-label="تعديل التقرير" title="تعديل التقرير">${ic('pen')}</button>
-        </div>
-        <div class="report-b" id="reportBody">${r ? reportSummary(part, r.data) : '<div class="sk line"></div><div class="sk line short"></div>'}</div>
-      </div>`;
-  }
-  async function loadReportBody(part) {
-    const date = S.date, cid = S.cls.id;
-    try {
-      const r = await fetchRecord(part, date);
-      if (S.cls && S.cls.id === cid && S.date === date && S.tab === part && !formOpen(part)) {
-        const b = $('#reportBody'); if (b) b.innerHTML = reportSummary(part, r.data);
-      }
-    } catch (x) {
-      const b = $('#reportBody'); if (b) b.innerHTML = `<p class="muted">${esc(x.message)}</p>`;
-      if (x.code === 'NOT_FOUND') refreshIndex();
-    }
-  }
-  function namesBy(map, pred) { return students().filter(s => pred(map[s.id])).map(s => s.name); }
-  function reportSummary(part, data) {
-    if (part === 'log') return logRows(data);
-    if (part === 'att') {
-      const list = cfg().lists.attendance, c = attCounts(data);
-      const rows = list.slice(1).map(st => { const n = namesBy(data, v => v === st); return n.length ? `<li><b>${esc(st)}</b><span>${esc(n.join('، '))}</span></li>` : ''; }).join('');
-      return `<div class="tally">${list.map((s, i) => `<span style="--tone:${TONES[i] || 'var(--p)'}"><i></i>${esc(s)} <b>${c.by[s] || 0}</b></span>`).join('')}</div>${rows ? `<ul class="sum">${rows}</ul>` : ''}`;
-    }
-    const y = namesBy(data, v => v === true).length, nList = namesBy(data, v => v === false);
-    return `<div class="tally"><span style="--tone:var(--ok)"><i></i>استظهر <b>${y}</b></span><span style="--tone:var(--bad)"><i></i>لم يستظهر <b>${nList.length}</b></span></div>
-      ${nList.length ? `<ul class="sum"><li><b>لم يستظهر</b><span>${esc(nList.join('، '))}</span></li></ul>` : ''}`;
-  }
-
-  /* حالة: مقفل */
-  function stateLocked(part) {
+  function lockedCard() {
     return `
       <div class="card state lock" style="--i:1">
         <div class="big">${ic('lock')}</div>
-        <b>تقرير هذا التاريخ مُرسَل ومقفل</b>
+        <b>تقرير هذا اليوم مُرسَل ومقفل</b>
         <p>يمكن تعديل آخر تقرير فقط</p>
         <div class="acts">
-          <button class="btn btn-soft" data-act="go-last" data-p="${part}">${ic('pen')} تعديل آخر تقرير</button>
+          <button class="btn btn-soft" data-act="go-last">${ic('pen')} تعديل آخر تقرير</button>
           <button class="btn btn-ghost" data-act="cal">${ic('cal')} تاريخ آخر</button>
         </div>
       </div>`;
   }
 
-  /* ───────── المؤشرات المدمجة (للعرض فقط) ───────── */
+  /* بطاقة تقرير اليوم المرسَل: ملخص الحضور والاستظهار والسجل + قلم للتعديل */
+  function dayCard() {
+    const r = recOf();
+    return `
+      <div class="report" style="--i:1">
+        <div class="report-h">
+          <span class="badge">${ic('note')}</span>
+          <div><b>تقرير اليوم</b><small>${esc(dLabel(S.date).full)} · مُرسَل</small></div>
+          <button class="icon-btn pen" data-act="edit" aria-label="تعديل التقرير" title="تعديل التقرير">${ic('pen')}</button>
+        </div>
+        <div class="report-b" id="reportBody">${r ? daySummary(r) : '<div class="sk line"></div><div class="sk line short"></div><div class="sk line"></div>'}</div>
+      </div>`;
+  }
+  async function loadDayCard() {
+    const date = S.date, cid = S.cls.id;
+    try {
+      const r = await fetchRecord(date);
+      if (S.cls && S.cls.id === cid && S.date === date && !formOpen()) { const b = $('#reportBody'); if (b) b.innerHTML = daySummary(r); }
+    } catch (x) {
+      const b = $('#reportBody'); if (b) b.innerHTML = `<p class="muted">${esc(x.message)}</p>`;
+      if (x.code === 'NOT_FOUND') refreshIndex();
+    }
+  }
+  const namesBy = (map, pred) => students().filter(s => pred(map[s.id])).map(s => s.name);
+  const sec = (title, inner) => `<div class="rsec"><h4>${title}</h4>${inner}</div>`;
+  function daySummary(r) {
+    if (r.log.off && r.log.off.on) return logRows(r.log);
+    let out = '';
+    if (isMain()) {
+      const list = cfg().lists.attendance, c = attCounts(r.att);
+      const names = list.slice(1).map(st => { const n = namesBy(r.att, v => v === st); return n.length ? `<li><b>${esc(st)}</b><span>${esc(n.join('، '))}</span></li>` : ''; }).join('');
+      out += sec('الحضور', `<div class="tally">${list.map((s, i) => `<span style="--tone:${TONES[i] || 'var(--p)'}"><i></i>${esc(s)} <b>${c.by[s] || 0}</b></span>`).join('')}</div>${names ? `<ul class="sum">${names}</ul>` : ''}`);
+      const y = namesBy(r.rec, v => v === true).length, nList = namesBy(r.rec, v => v === false);
+      out += sec('الاستظهار', `<div class="tally"><span style="--tone:var(--ok)"><i></i>استظهر <b>${y}</b></span><span style="--tone:var(--bad)"><i></i>لم يستظهر <b>${nList.length}</b></span></div>
+        ${nList.length ? `<ul class="sum"><li><b>لم يستظهر</b><span>${esc(nList.join('، '))}</span></li></ul>` : ''}`);
+    }
+    out += sec('السجل اليومي', logRows(r.log));
+    return out;
+  }
+
+  /* ───────── الرحلة ───────── */
+  function journey() {
+    const d = S.draft;
+    if (d.log.off && d.log.off.on) return formOff();
+    const ss = steps(), i = Math.min(d.step || 0, ss.length - 1), cur = ss[i];
+    const body = { att: stepAtt, rec: stepRec, quran: stepQuran, lessons: stepLessons, review: stepReview }[cur]();
+    return `
+      <div class="stepper j" style="--i:1">${ss.map((s, k) => `<button class="stp ${k < i ? 'done' : k === i ? 'on' : ''}" data-act="step-go" data-s="${k}" ${k > i ? 'disabled' : ''}><div class="b"><i></i></div><span>${STEP[s].label}</span></button>`).join('')}</div>
+      ${body}
+      ${i === 0 ? `<button class="offlink" data-act="off-on" style="--i:7">${ic('info')} لم تُقدَّم أي حصة في هذا اليوم</button>` : ''}`;
+  }
+
+  /* شريط ثابت أسفل الشاشة: السابق / التالي / إرسال */
+  function renderNav() {
+    const slot = $('#navSlot'); if (!slot) return;
+    if (!S.draft || !formOpen()) { slot.innerHTML = ''; return; }
+    const d = S.draft, editing = S.editing;
+    if (d.log.off && d.log.off.on) {
+      slot.innerHTML = `<nav class="jbar"><button class="btn btn-ghost" data-act="off-off">${ic('prev')} رجوع</button>
+        <button class="btn btn-primary" data-act="send"><span>${ic(editing ? 'check' : 'send')}</span><span>${editing ? 'حفظ التعديل' : 'إرسال'}</span></button></nav>`;
+      return;
+    }
+    const ss = steps(), i = Math.min(d.step || 0, ss.length - 1), last = i === ss.length - 1;
+    slot.innerHTML = `<nav class="jbar">
+      ${i > 0 ? `<button class="btn btn-ghost" data-act="step-prev" aria-label="السابق">${ic('prev')}</button>` : ''}
+      ${last ? `<button class="btn btn-primary" data-act="send"><span>${ic(editing ? 'check' : 'send')}</span><span>${editing ? 'حفظ التعديل' : 'إرسال تقرير اليوم'}</span></button>`
+             : `<button class="btn btn-primary" data-act="step-next"><span>التالي: ${STEP[ss[i + 1]].label}</span>${ic('next')}</button>`}
+      <span class="jcount">${i + 1}/${ss.length}</span>
+    </nav>`;
+  }
+
+  /* المؤشرات المدمجة */
   function attCounts(map) {
     const list = cfg().lists.attendance, by = {};
     list.forEach(s => { by[s] = 0; });
@@ -578,95 +555,50 @@
   }
   function miniCard(title, done, total, items) {
     const pct = total ? Math.round(done * 100 / total) : 0;
-    return `
-      <div class="mini">
-        <div class="ring" style="--v:${pct}"><b>${pct}%</b></div>
-        <div class="mini-b">
-          <div class="mini-t"><span>${title}</span><b>${done}<small>/${total}</small></b></div>
-          <div class="tally">${items.map(it => `<span style="--tone:${it.tone}"><i></i>${esc(it.label)} <b>${it.n}</b></span>`).join('')}</div>
-        </div>
-      </div>`;
+    return `<div class="mini"><div class="ring" style="--v:${pct}"><b>${pct}%</b></div>
+      <div class="mini-b"><div class="mini-t"><span>${title}</span><b>${done}<small>/${total}</small></b></div>
+      <div class="tally">${items.map(it => `<span style="--tone:${it.tone}"><i></i>${esc(it.label)} <b>${it.n}</b></span>`).join('')}</div></div></div>`;
   }
+  const recPresent = () => students().filter(s => S.draft.att[s.id] !== absentLabel());
   function attStats() {
     const c = attCounts(S.draft.att), list = cfg().lists.attendance;
     return miniCard('تسجيل الحضور', c.marked, c.total, list.slice(0, 3).map((s, i) => ({ label: s, n: c.by[s] || 0, tone: TONES[i] })));
   }
   function recStats() {
-    const r = S.draft.rec; let y = 0, n = 0;
-    students().forEach(s => { if (r[s.id] === true) y++; else if (r[s.id] === false) n++; });
-    return miniCard('الاستظهار', y + n, students().length, [
-      { label: 'استظهر', n: y, tone: 'var(--ok)' }, { label: 'لم يستظهر', n, tone: 'var(--bad)' },
-      { label: 'لم يُحدَّد', n: students().length - y - n, tone: 'var(--muted)' }]);
+    const r = S.draft.rec, pres = recPresent(); let y = 0, n = 0;
+    pres.forEach(s => { if (r[s.id] === true) y++; else if (r[s.id] === false) n++; });
+    return miniCard('الاستظهار', y + n, pres.length, [{ label: 'استظهر', n: y, tone: 'var(--ok)' }, { label: 'لم يستظهر', n, tone: 'var(--bad)' }, { label: 'لم يُحدَّد', n: pres.length - y - n, tone: 'var(--muted)' }]);
   }
-  function refreshStats() { const b = $('#stats'); if (b) b.innerHTML = S.tab === 'att' ? attStats() : recStats(); }
+  function refreshStats() { const b = $('#stats'); if (b) b.innerHTML = (stepNow() === 'att' ? attStats() : recStats()); }
+  const stepNow = () => steps()[Math.min(S.draft.step || 0, steps().length - 1)];
 
-  /* ───────── الحضور ───────── */
-  function formAtt() {
+  function stepAtt() {
     const st = students(), list = cfg().lists.attendance, a = S.draft.att;
     if (!st.length) return emptyState('لا يوجد تلاميذ نشطون في هذا القسم');
     return `
-      <div id="stats" style="--i:1">${attStats()}</div>
-      <div class="toolbar" style="--i:2"><h3>التلاميذ</h3><button class="btn btn-soft btn-sm" data-act="att-all">${ic('check')} الكل ${esc(list[0] || '')}</button></div>
+      <div id="stats" style="--i:2">${attStats()}</div>
+      <div class="toolbar" style="--i:3"><h3>من حضر اليوم؟</h3><button class="btn btn-soft btn-sm" data-act="att-all">${ic('check')} الكل ${esc(list[0] || '')}</button></div>
       <div class="list">${st.map((s, n) => `
-        <div class="srow" style="--i:${Math.min(n + 3, 14)}">
+        <div class="srow" style="--i:${Math.min(n + 4, 14)}">
           <span class="av">${esc(initial(s.name))}</span><span class="sname">${esc(s.name)}</span>
           <div class="opts" data-id="${esc(s.id)}">${list.map((v, i) => `<button data-act="att" data-v="${esc(v)}" class="${a[s.id] === v ? 'on' : ''}" style="--tone:${TONES[i] || 'var(--p)'}" title="${esc(v)}" aria-label="${esc(v)}">${ATT_IC[i] ? ic(ATT_IC[i]) : esc(v[0])}</button>`).join('')}</div>
         </div>`).join('')}</div>`;
   }
-
-  /* ───────── الاستظهار ───────── */
-  function formRec() {
-    const st = students(), r = S.draft.rec;
-    if (!st.length) return emptyState('لا يوجد تلاميذ نشطون في هذا القسم');
+  function stepRec() {
+    const st = students(), r = S.draft.rec, a = S.draft.att, absent = absentLabel();
     return `
-      <div id="stats" style="--i:1">${recStats()}</div>
-      <div class="toolbar" style="--i:2"><h3>من استظهر؟</h3><button class="btn btn-soft btn-sm" data-act="rec-all">${ic('check')} الكل استظهر</button></div>
-      <div class="list">${st.map((s, n) => `
-        <div class="srow" style="--i:${Math.min(n + 3, 14)}">
-          <span class="av">${esc(initial(s.name))}</span><span class="sname">${esc(s.name)}</span>
+      <div id="stats" style="--i:2">${recStats()}</div>
+      <div class="toolbar" style="--i:3"><h3>من استظهر؟</h3><button class="btn btn-soft btn-sm" data-act="rec-all">${ic('check')} الكل استظهر</button></div>
+      <div class="list">${st.map((s, n) => {
+        const abs = a[s.id] === absent;
+        return `
+        <div class="srow ${abs ? 'dim' : ''}" style="--i:${Math.min(n + 4, 14)}">
+          <span class="av">${esc(initial(s.name))}</span><span class="sname">${esc(s.name)}${abs ? ` <span class="tag">${esc(absent)}</span>` : ''}</span>
           <div class="opts" data-id="${esc(s.id)}">
-            <button data-act="rec" data-v="1" class="${r[s.id] === true ? 'on' : ''}" style="--tone:var(--ok)" title="استظهر" aria-label="استظهر">${ic('check')}</button>
-            <button data-act="rec" data-v="0" class="${r[s.id] === false ? 'on' : ''}" style="--tone:var(--bad)" title="لم يستظهر" aria-label="لم يستظهر">${ic('x')}</button>
+            <button data-act="rec" data-v="1" class="${r[s.id] === true ? 'on' : ''}" style="--tone:var(--ok)" ${abs ? 'disabled' : ''} aria-label="استظهر">${ic('check')}</button>
+            <button data-act="rec" data-v="0" class="${r[s.id] === false ? 'on' : ''}" style="--tone:var(--bad)" ${abs ? 'disabled' : ''} aria-label="لم يستظهر">${ic('x')}</button>
           </div>
-        </div>`).join('')}</div>`;
-  }
-
-  /* ───────── السجل اليومي ───────── */
-  const logSteps = () => (isMain() ? ['quran', 'lessons', 'notes'] : ['lessons', 'notes']);
-  /* حصة لم تُقدَّم: السبب فقط (لا يبقى اليوم فارغاً) */
-  function formOff() {
-    const o = S.draft.log.off, editing = !!S.edit.log;
-    return `
-      <div class="card offcard" style="--i:1">
-        <div class="sec-h"><span class="badge">${ic('info')}</span><div><b>لم تُقدَّم أي حصة في هذا اليوم</b><small>${esc(dLabel(S.date).full)}</small></div></div>
-        <div class="field"><span>السبب</span><div class="chips">${(cfg().lists.off || []).map(r => chip('log.off.reason', r, o.reason === r)).join('')}</div></div>
-        <label class="field"><span>ملاحظة</span><textarea class="inp" data-bind="log.off.note" placeholder="اختيارية">${esc(o.note)}</textarea></label>
-      </div>
-      <div class="stepnav" style="--i:3">
-        <button class="btn btn-ghost" data-act="off-off">${ic('prev')} رجوع</button>
-        <button class="btn btn-primary" data-act="save-log"><span>${ic(editing ? 'check' : 'send')}</span><span>${editing ? 'حفظ التعديل' : 'إرسال'}</span></button>
-      </div>`;
-  }
-
-  function formLog() {
-    const L = S.draft.log;
-    if (L.off && L.off.on) return formOff();
-    // خيار واحد لليوم كله، يظهر في الخطوة الأولى فقط
-    const first = (L.step || 0) === 0;
-    return formLogSteps() + (first ? `<button class="offlink" data-act="off-on" style="--i:7">${ic('info')} لم تُقدَّم أي حصة في هذا اليوم</button>` : '');
-  }
-  function formLogSteps() {
-    const steps = logSteps(), L = S.draft.log;
-    const st = Math.min(L.step || 0, steps.length - 1), last = st === steps.length - 1, editing = !!S.edit.log;
-    const body = { quran: stepQuran, lessons: stepLessons, notes: stepNotes }[steps[st]]();
-    return `
-      <div class="stepper" style="--i:1">${steps.map((s, i) => `<button class="stp ${i < st ? 'done' : i === st ? 'on' : ''}" data-act="step-go" data-s="${i}"><div class="b"><i></i></div><span>${i + 1}. ${STEP_LABEL[s]}</span></button>`).join('')}</div>
-      ${body}
-      <div class="stepnav" style="--i:6">
-        ${st > 0 ? `<button class="btn btn-ghost" data-act="step-prev">${ic('prev')} السابق</button>` : ''}
-        ${last ? `<button class="btn btn-primary" data-act="save-log"><span>${ic(editing ? 'check' : 'send')}</span><span>${editing ? 'حفظ التعديل' : 'إرسال التقرير'}</span></button>`
-               : `<button class="btn btn-primary" data-act="step-next"><span>التالي</span>${ic('next')}</button>`}
-      </div>`;
+        </div>`; }).join('')}</div>`;
   }
   function stepQuran() {
     const q = S.draft.log.quran;
@@ -694,7 +626,7 @@
     const multi = (label, path, opts, sel) => opts.length ? `<div class="field"><span>${label}</span><div class="chips">${opts.map(o => chip(path, o, sel.indexOf(o) > -1, true)).join('')}</div></div>` : '';
     return L.lessons.map((l, i) => `
       <div class="card" style="--i:${i + 2}">
-        <div class="sec-h"><span class="num">${i + 1}</span><div><b>الحصة ${ORD[i]}</b><small>${esc(l.subject || 'اختر المادة')}</small></div>
+        <div class="sec-h"><span class="num">${i + 1}</span><div><b>الحصة ${ORD[i]}</b><small>${esc(l.subject || (isMain() ? 'اختيارية — اترُكها إن لم تُدرَّس مادة' : 'اختر المادة'))}</small></div>
           ${i > 0 ? `<button class="icon-btn sm plain" data-act="del-lesson" data-i="${i}" aria-label="حذف الحصة">${ic('trash')}</button>` : ''}</div>
         <div class="field"><span>المادة</span><div class="chips">${subs.map(s => chip(`log.lessons.${i}.subject`, s, l.subject === s)).join('') || '<small class="muted">لا توجد مواد لهذا المستوى في صفحة المنهاج</small>'}</div></div>
         <label class="field"><span>الدرس</span><input class="inp" data-bind="log.lessons.${i}.lesson" value="${esc(l.lesson)}" placeholder="عنوان الدرس"></label>
@@ -716,140 +648,120 @@
       rows.push(['القرآن', qt ? (qt === T.TALQIN && (q.from || q.to) ? `${qt}: من ${q.from || '…'} إلى ${q.to || '…'}` : qt) : '—']);
       if (q.notes) rows.push(['ملاحظات الحصة', q.notes]);
     }
-    (L.lessons || []).forEach((l, i) => (i === 0 || l.subject) && rows.push(['الحصة ' + ORD[i], l.subject ? l.subject + (l.lesson ? ' — ' + l.lesson : '') : '—']));
+    (L.lessons || []).forEach((l, i) => l.subject && rows.push(['الحصة ' + ORD[i], l.subject + (l.lesson ? ' — ' + l.lesson : '')]));
     if (L.notes) rows.push(['ملاحظات', L.notes]);
     return `<ul class="sum">${rows.map(r => `<li><b>${r[0]}</b><span>${esc(r[1])}</span></li>`).join('')}</ul>`;
   }
-  function stepNotes() {
-    const L = S.draft.log;
+  function stepReview() {
+    const d = S.draft;
     return `
       <div class="card" style="--i:2">
         <div class="sec-h"><span class="badge">${ic('note')}</span><div><b>ملاحظات اليوم</b><small>اختيارية</small></div></div>
-        <label class="field"><textarea class="inp" data-bind="log.notes" placeholder="أي ملاحظة عن الحصة أو التلاميذ...">${esc(L.notes)}</textarea></label>
+        <label class="field"><textarea class="inp" data-bind="log.notes" placeholder="أي ملاحظة عن الحصة أو التلاميذ...">${esc(d.log.notes)}</textarea></label>
       </div>
-      <div class="card" style="--i:3">
-        <div class="sec-h"><span class="badge">${ic('check')}</span><div><b>ملخص التقرير</b><small>${esc(dLabel(S.date).full)}</small></div></div>
-        ${logRows(L)}
+      <div class="report" style="--i:3">
+        <div class="report-h"><span class="badge">${ic('check')}</span><div><b>مراجعة قبل الإرسال</b><small>${esc(dLabel(S.date).full)}</small></div></div>
+        <div class="report-b">${daySummary({ att: d.att, rec: d.rec, log: d.log })}</div>
+      </div>`;
+  }
+  function formOff() {
+    const o = S.draft.log.off;
+    return `
+      <div class="card offcard" style="--i:1">
+        <div class="sec-h"><span class="badge">${ic('info')}</span><div><b>لم تُقدَّم أي حصة في هذا اليوم</b><small>${esc(dLabel(S.date).full)}</small></div></div>
+        <div class="field"><span>السبب</span><div class="chips">${(cfg().lists.off || []).map(r => chip('log.off.reason', r, o.reason === r)).join('')}</div></div>
+        <label class="field"><span>ملاحظة</span><textarea class="inp" data-bind="log.off.note" placeholder="اختيارية">${esc(o.note)}</textarea></label>
       </div>`;
   }
 
   /* ───────── عناصر مشتركة ───────── */
   const initial = n => (String(n || '؟').trim()[0] || '؟');
   const emptyState = msg => `<div class="card empty">${ic('users')}<p>${esc(msg)}</p></div>`;
-  /* الشريحة: تلوين فقط عند الاختيار (بدون علامة، فلا يتغير حجمها) */
   function chip(path, v, on, multi, rerender) {
     return `<button class="chip ${on ? 'on' : ''}" data-act="chip" data-path="${path}" data-v="${esc(v)}"${multi ? ' data-multi="1"' : ''}${rerender ? ' data-rr="1"' : ''}>${esc(v)}</button>`;
   }
 
-  /* زر حفظ صغير عائم: يظهر فقط عند وجود تغييرات (الحضور والاستظهار) */
-  function renderSaveFab() {
-    const slot = $('#saveSlot'); if (!slot) return;
-    const part = S.tab, show = !!S.draft && part !== 'log' && formOpen(part) && S.draft.dirty[part];
-    if (!show) { slot.innerHTML = ''; return; }
-    if ($('.savefab', slot)) return;
-    slot.innerHTML = `<button class="savefab" data-act="save-${part}"><span>${ic('check')}</span><span>${S.edit[part] ? 'حفظ التعديل' : 'حفظ ' + PART[part]}</span></button>`;
+  /* ───────────── التحقق من كل خطوة قبل الانتقال ───────────── */
+  function checkStep(step) {
+    const d = S.draft;
+    if (step === 'att') {
+      const left = students().filter(s => !d.att[s.id]).length;
+      if (left) { toast(`حدّد حضور كل التلاميذ (بقي ${left})`, 'warn'); return false; }
+    }
+    if (step === 'rec') {
+      students().forEach(s => { if (d.att[s.id] === absentLabel()) delete d.rec[s.id]; });
+      const left = recPresent().filter(s => typeof d.rec[s.id] !== 'boolean').length;
+      if (left) { toast(`حدّد الاستظهار لكل الحاضرين (بقي ${left})`, 'warn'); return false; }
+    }
+    if (step === 'quran' && S.cls.type !== T.MUNAFASA && !d.log.quran.type) { toast('اختر نوع حصة القرآن', 'warn'); return false; }
+    if (step === 'lessons') {
+      const bad = d.log.lessons.findIndex(l => l.subject && !l.lesson.trim());
+      if (bad > -1) {
+        toast(`اكتب عنوان درس الحصة ${ORD[bad]}`, 'warn');
+        const inp = $(`[data-bind="log.lessons.${bad}.lesson"]`); if (inp) inp.focus();
+        return false;
+      }
+      if (!isMain() && !d.log.lessons.some(l => l.subject)) { toast('اختر المادة واكتب الدرس', 'warn'); return false; }
+    }
+    return true;
   }
-
-  /* ───────────── الحفظ ───────────── */
-  function afterSave(part, res, copy) {
-    if (res && res.index) S.cls.index[part] = res.index;
-    LS.set('session', S.session);
-    S.recs[S.cls.id + '|' + part + '|' + S.date] = { data: copy };
-    S.edit[part] = false;
-    S.draft[part] = emptyOf(part);                       // الخانات تعود فارغة دائماً
-    S.draft.dirty[part] = false;
-    persist(true);
-    renderPanel(true);
+  function goStep(i) {
+    S.draft.step = Math.max(0, Math.min(i, steps().length - 1));
+    persist(); renderPanel(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  async function savePart(part, btn) {
-    const st = students(), editing = !!S.edit[part];
-    let action, items, copy;
-    if (part === 'att') {
-      const a = S.draft.att;
-      items = st.filter(s => a[s.id]).map(s => ({ id: s.id, status: a[s.id] }));
-      if (!items.length) return toast('لم تحدد حالة أي تلميذ', 'warn');
-      const left = st.length - items.length;
-      if (left && !confirm(`بقي ${left} تلميذ دون تحديد. حفظ الحضور هكذا؟`)) return;
-      action = 'saveAttendance'; copy = clone(a);
+  /* ───────────── الإرسال (عملية واحدة) ───────────── */
+  async function send(btn) {
+    const d = S.draft, editing = S.editing, off = d.log.off && d.log.off.on;
+    let payload;
+    if (off) {
+      if (!d.log.off.reason) return toast('اختر سبب عدم تقديم الحصة', 'warn');
+      payload = { noSession: { reason: d.log.off.reason, note: d.log.off.note } };
     } else {
-      const r = S.draft.rec;
-      items = st.filter(s => typeof r[s.id] === 'boolean').map(s => ({ id: s.id, done: r[s.id] }));
-      if (!items.length) return toast('لم تحدد أي تلميذ', 'warn');
-      action = 'saveRecitation'; copy = clone(r);
+      for (const s of steps()) if (s !== 'review' && !checkStep(s)) { goStep(steps().indexOf(s)); return; }
+      const q = Object.assign({}, d.log.quran);
+      if (S.cls.type === T.MUNAFASA) { q.type = T.MUNAFASA; q.from = q.to = ''; }
+      else if (q.type === T.TALQIN) q.notes = ''; else { q.from = q.to = ''; }
+      payload = {
+        log: { quran: isMain() ? q : null, lessons: d.log.lessons.filter(l => l.subject || l.lesson), notes: d.log.notes },
+        att: isMain() ? students().map(s => ({ id: s.id, status: d.att[s.id] })) : [],
+        rec: isMain() ? recPresent().map(s => ({ id: s.id, done: d.rec[s.id] })) : []
+      };
     }
     setBusy(btn, true);
     try {
-      const res = await call(action, { classId: S.cls.id, date: S.date, items });
-      afterSave(part, res, copy);
-      toast(editing ? `تم حفظ تعديل ${PART[part]}` : `تم حفظ ${PART[part]}`, 'ok');
-    } catch (x) { setBusy(btn, false); toast(x.message, 'bad'); if (x.code === 'LOCKED') refreshIndex(); }
-  }
-
-  async function saveLog(btn) {
-    const L = S.draft.log, q = Object.assign({}, L.quran), editing = !!S.edit.log;
-    if (L.off && L.off.on) {
-      if (!L.off.reason) return toast('اختر سبب عدم تقديم الحصة', 'warn');
-      setBusy(btn, true);
-      try {
-        const noSession = { reason: L.off.reason, note: L.off.note };
-        const res = await call('saveLog', { classId: S.cls.id, date: S.date, noSession });
-        afterSave('log', res, logFrom({ off: Object.assign({ on: true }, noSession) }));
-        toast('تم تسجيل أن الحصة لم تُقدَّم', 'ok');
-      } catch (x) { setBusy(btn, false); toast(x.message, 'bad'); if (x.code === 'LOCKED') refreshIndex(); }
-      return;
-    }
-    if (S.cls.type === T.MUNAFASA) { q.type = T.MUNAFASA; q.from = q.to = ''; }
-    else if (q.type === T.TALQIN) q.notes = '';
-    else { q.from = q.to = ''; }
-    const lessons = L.lessons.filter(l => l.subject || l.lesson);
-    if (isMain() && S.cls.type !== T.MUNAFASA && !q.type && !lessons.length) return toast('التقرير فارغ', 'warn');
-    if (!isMain() && !lessons.length) return toast('اختر المادة واكتب الدرس أولاً', 'warn');
-    setBusy(btn, true);
-    try {
-      const payload = { quran: isMain() ? q : null, lessons, notes: L.notes };
-      const res = await call('saveLog', Object.assign({ classId: S.cls.id, date: S.date }, payload));
-      afterSave('log', res, logFrom(clone({ quran: payload.quran || {}, lessons, notes: L.notes })));
-      toast(editing ? 'تم حفظ تعديل التقرير' : 'تم إرسال التقرير', 'ok');
+      const res = await call('saveDay', Object.assign({ classId: S.cls.id, date: S.date }, payload));
+      if (res && res.index) S.cls.index.log = res.index;
+      LS.set('session', S.session);
+      S.recs[dayKey()] = off ? { att: {}, rec: {}, log: logFrom({ off: Object.assign({ on: true }, payload.noSession) }) }
+                             : { att: clone(d.att), rec: clone(payload.rec.reduce((o, x) => (o[x.id] = x.done, o), {})), log: logFrom(clone(payload.log)) };
+      S.editing = false;
+      S.draft = freshDay();
+      persist(true);
+      renderPanel(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      toast(editing ? 'تم حفظ التعديل' : (off ? 'تم تسجيل أن الحصة لم تُقدَّم' : 'تم إرسال تقرير اليوم'), 'ok');
     } catch (x) { setBusy(btn, false); toast(x.message, 'bad'); if (x.code === 'LOCKED') refreshIndex(); }
   }
 
   /* فتح آخر تقرير للتعديل */
-  async function startEdit(part, btn) {
-    let r = recOf(part);
+  async function startEdit(btn) {
+    let r = recOf();
     if (!r) {
       setBusy(btn, true);
-      try { r = await fetchRecord(part, S.date); }
+      try { r = await fetchRecord(S.date); }
       catch (x) { setBusy(btn, false); toast(x.message, 'bad'); if (x.code === 'NOT_FOUND') refreshIndex(); return; }
     }
-    S.edit[part] = true;
-    S.draft[part] = clone(r.data);
-    if (part === 'log') S.draft.log.step = 0;
-    S.draft.dirty[part] = false;
+    S.editing = true;
+    S.draft = Object.assign(freshDay(), { att: clone(r.att), rec: clone(r.rec), log: clone(r.log) });
     renderPanel(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function goStep(i) {
-    S.draft.log.step = Math.max(0, Math.min(i, logSteps().length - 1));
-    persist(); renderPanel(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-  function checkLessons() {
-    const bad = S.draft.log.lessons.findIndex(l => l.subject && !l.lesson.trim());
-    if (bad > -1) {
-      toast(`اكتب عنوان درس الحصة ${ORD[bad]}`, 'warn');
-      const inp = $(`[data-bind="log.lessons.${bad}.lesson"]`); if (inp) inp.focus();
-      return false;
-    }
-    return true;
-  }
-
-  function changeDate(d, editPart) {
-    closeSheet();
-    persist(true);
-    S.pendingEdit = editPart || null;
+  function changeDate(d, edit) {
+    closeSheet(); persist(true);
+    S.pendingEdit = !!edit;
     S.date = d; saveUI(); loadDay();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -858,14 +770,14 @@
     if (!silent && !confirm('تسجيل الخروج من هذا الجهاز؟')) return;
     LS.keys('draft.').forEach(k => LS.del(k));
     LS.del('session'); LS.del('ui');
-    Object.assign(S, { session: null, cls: null, draft: null, edit: {}, recs: {} });
+    Object.assign(S, { session: null, cls: null, draft: null, editing: false, recs: {} });
     renderLogin();
     if (msg) toast(msg, 'warn');
   }
 
   /* ───────────── الأحداث ───────────── */
   document.addEventListener('click', e => {
-    const b = e.target.closest('[data-act]'); if (!b) return;
+    const b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
     const act = b.dataset.act;
     switch (act) {
       case 'theme': return toggleTheme();
@@ -886,102 +798,95 @@
         const inp = $('#code'), show = inp.type === 'password';
         inp.type = show ? 'text' : 'password'; b.innerHTML = ic(show ? 'eyeOff' : 'eye'); return;
       }
-      case 'tab': {
-        if (b.dataset.t === S.tab) return;
-        S.tab = b.dataset.t; saveUI(); syncTabs();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-        return renderPanel(true);
-      }
     }
     if (!S.draft) return;
+    const d = S.draft;
     switch (act) {
-      case 'go-last': { const p = b.dataset.p; return changeDate(idx(p).last, p); }
-      case 'edit': return startEdit(b.dataset.p, b);
+      case 'go-last': return changeDate(index().last, true);
+      case 'edit': return startEdit(b);
       case 'cancel-edit': {
-        const p = b.dataset.p;
-        if (S.draft.dirty[p] && !confirm('إلغاء التعديلات غير المحفوظة؟')) return;
-        S.draft[p] = emptyOf(p); S.draft.dirty[p] = false; S.edit[p] = false; persist(true);
+        if (d.dirty && !confirm('إلغاء التعديلات غير المحفوظة؟')) return;
+        S.editing = false; S.draft = freshDay(); persist(true);
         return renderPanel(true);
+      }
+      case 'step-next': {
+        const ss = steps(), i = Math.min(d.step || 0, ss.length - 1);
+        if (!checkStep(ss[i])) return;
+        return goStep(i + 1);
+      }
+      case 'step-prev': return goStep((d.step || 0) - 1);
+      case 'step-go': return goStep(+b.dataset.s);
+      case 'send': return send(b);
+      case 'off-on': case 'off-off': {
+        d.log.off = d.log.off || freshOff();
+        d.log.off.on = act === 'off-on';
+        markDirty(); renderPanel(true);
+        return window.scrollTo({ top: 0, behavior: 'smooth' });
       }
       case 'att': {
         const id = b.parentElement.dataset.id, v = b.dataset.v;
-        if (S.draft.att[id] === v) delete S.draft.att[id]; else S.draft.att[id] = v;
-        $$('button', b.parentElement).forEach(x => x.classList.toggle('on', x === b && !!S.draft.att[id]));
+        if (d.att[id] === v) delete d.att[id]; else d.att[id] = v;
+        $$('button', b.parentElement).forEach(x => x.classList.toggle('on', x === b && !!d.att[id]));
         b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop');
-        markDirty('att'); return refreshStats();
+        markDirty(); return refreshStats();
       }
       case 'att-all': {
         const v = cfg().lists.attendance[0];
-        students().forEach(s => { if (!S.draft.att[s.id]) S.draft.att[s.id] = v; });
-        markDirty('att'); return renderPanel(false);
+        students().forEach(s => { if (!d.att[s.id]) d.att[s.id] = v; });
+        markDirty(); return renderPanel(false);
       }
       case 'rec': {
         const id = b.parentElement.dataset.id, v = b.dataset.v === '1';
-        if (S.draft.rec[id] === v) delete S.draft.rec[id]; else S.draft.rec[id] = v;
-        $$('button', b.parentElement).forEach(x => x.classList.toggle('on', S.draft.rec[id] === (x.dataset.v === '1')));
+        if (d.rec[id] === v) delete d.rec[id]; else d.rec[id] = v;
+        $$('button', b.parentElement).forEach(x => x.classList.toggle('on', d.rec[id] === (x.dataset.v === '1')));
         b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop');
-        markDirty('rec'); return refreshStats();
+        markDirty(); return refreshStats();
       }
       case 'rec-all': {
-        students().forEach(s => { if (typeof S.draft.rec[s.id] !== 'boolean') S.draft.rec[s.id] = true; });
-        markDirty('rec'); return renderPanel(false);
+        recPresent().forEach(s => { if (typeof d.rec[s.id] !== 'boolean') d.rec[s.id] = true; });
+        markDirty(); return renderPanel(false);
       }
-      case 'save-att': return savePart('att', b);
-      case 'save-rec': return savePart('rec', b);
-      case 'save-log': return saveLog(b);
       case 'chip': {
         const path = b.dataset.path, v = b.dataset.v;
         if (b.dataset.multi) {
-          const arr = getPath(S.draft, path) || [], i = arr.indexOf(v);
+          const arr = getPath(d, path) || [], i = arr.indexOf(v);
           i < 0 ? arr.push(v) : arr.splice(i, 1);
-          setPath(S.draft, path, arr); b.classList.toggle('on', i < 0);
+          setPath(d, path, arr); b.classList.toggle('on', i < 0);
         } else {
-          const nv = getPath(S.draft, path) === v ? '' : v;
-          setPath(S.draft, path, nv);
-          if (b.dataset.rr) { markDirty('log'); return renderPanel(false); }
+          const nv = getPath(d, path) === v ? '' : v;
+          setPath(d, path, nv);
+          if (b.dataset.rr) { markDirty(); return renderPanel(false); }
           $$('.chip', b.parentElement).forEach(x => x.classList.toggle('on', x === b && !!nv));
           const card = b.closest('.card'), sub = card && $('.sec-h small', card);
           if (sub && /subject$/.test(path)) sub.textContent = nv || 'اختر المادة';
         }
-        return markDirty('log');
+        return markDirty();
       }
       case 'add-lesson': {
-        if (S.draft.log.lessons.length < MAX_LESSONS) S.draft.log.lessons.push(emptyLesson());
-        markDirty('log'); renderPanel(false);
+        if (d.log.lessons.length < MAX_LESSONS) d.log.lessons.push(emptyLesson());
+        markDirty(); renderPanel(false);
         const cards = $$('#panel .card'), lastCard = cards[cards.length - 1];
         if (lastCard) window.scrollTo({ top: window.scrollY + lastCard.getBoundingClientRect().top - 12, behavior: 'smooth' });
         return;
       }
       case 'del-lesson': {
         if (!confirm('حذف هذه الحصة؟')) return;
-        S.draft.log.lessons.splice(+b.dataset.i, 1);
-        markDirty('log'); return renderPanel(false);
+        d.log.lessons.splice(+b.dataset.i, 1);
+        markDirty(); return renderPanel(false);
       }
-      case 'step-next': {
-        if (logSteps()[S.draft.log.step || 0] === 'lessons' && !checkLessons()) return;
-        return goStep((S.draft.log.step || 0) + 1);
-      }
-      case 'step-prev': return goStep((S.draft.log.step || 0) - 1);
-      case 'off-on': case 'off-off': {
-        S.draft.log.off = S.draft.log.off || freshOff();
-        S.draft.log.off.on = act === 'off-on';
-        markDirty('log'); renderPanel(true);
-        return window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
-      case 'step-go': return goStep(+b.dataset.s);
     }
   });
 
   app.addEventListener('input', e => {
     const el = e.target.closest('[data-bind]'); if (!el || !S.draft) return;
     setPath(S.draft, el.dataset.bind, el.value);
-    markDirty('log');
+    markDirty();
   });
 
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return persist(true);
-    if (S.session && S.session.token && Date.now() - S.lastIdx > 60000) refreshIndex();   // عند العودة للتطبيق
+    if (S.session && S.session.token && Date.now() - S.lastIdx > 60000) refreshIndex();
   });
   window.addEventListener('pagehide', () => persist(true));
   window.addEventListener('offline', () => toast('انقطع الاتصال — تغييراتك محفوظة على الجهاز', 'warn'));
@@ -991,18 +896,19 @@
   /* ───────────── الإقلاع ───────────── */
   function boot() {
     const s = LS.get('session', null);
-    const fresh = s && s.code && s.config && ('today' in s.config) && s.classes && s.classes.every(c => c.index);
+    const fresh = s && s.code && s.config && ('today' in s.config) && s.classes && s.classes.every(c => c.index && c.index.log && !c.index.att);
     if (!fresh) { if (s && s.code) return relogin(s.code); return renderLogin(); }
     S.session = s;
     const ui = LS.get('ui', {});
     const only = s.classes.length === 1 ? s.classes[0].id : null;
     const target = s.classes.some(c => c.id === ui.classId) ? ui.classId : only;
-    target ? openClass(target, ui.date, ui.tab) : renderPicker();          // عرض فوري من الذاكرة
+    target ? openClass(target, ui.date) : renderPicker();
     login(s.code).then(cleanupDrafts).catch(x => { if (x.code === 'BAD_CODE') logout(true, 'تغيّر رمز الدخول، أعد الدخول'); });
   }
-  /* جلسة من إصدار سابق: دخول صامت بالرمز المحفوظ */
+  /* جلسة من إصدار سابق: دخول صامت بالرمز المحفوظ (مع مسح مسودات الإصدار السابق) */
   function relogin(code) {
     renderLogin();
+    LS.keys('draft.').forEach(k => LS.del(k));
     S.session = { code, config: {} };
     login(code).then(() => { const cs = S.session.classes; cs.length === 1 ? openClass(cs[0].id) : renderPicker(); })
       .catch(() => { S.session = null; LS.del('session'); });

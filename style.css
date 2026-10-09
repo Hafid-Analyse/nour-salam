@@ -466,3 +466,24 @@ textarea.inp { min-height: 110px; resize: vertical; }
 .cd.sel.rec::after { background: #34D399; box-shadow: 0 0 0 2px #fff; }
 .cd.sel.half::after { background: #FBBF24; box-shadow: 0 0 0 2px #fff; }
 .cd.sel.miss::after { background: #F87171; box-shadow: 0 0 0 2px #fff; }
+
+/* ───────── الرحلة: شريط السابق/التالي الثابت ───────── */
+.jbar {
+  position: fixed; z-index: 30; left: 50%; transform: translateX(-50%); bottom: var(--dock);
+  width: min(calc(100% - 28px), 500px); display: flex; align-items: center; gap: 8px; padding: 7px; border-radius: 999px;
+  background: var(--glass); border: 1px solid var(--line); box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(18px) saturate(1.5); -webkit-backdrop-filter: blur(18px) saturate(1.5);
+}
+.jbar .btn-primary { flex: 1; height: 48px; }
+.jbar .btn-ghost { height: 48px; min-width: 48px; padding: 0 16px; box-shadow: none; }
+.jcount { font-family: var(--f-ui); font-size: .78rem; font-weight: 600; color: var(--muted); padding: 0 8px; }
+.stepper.j { gap: 6px; padding: 10px 12px; }
+.stepper.j .stp span { font-size: .7rem; text-align: center; }
+.stepper.j .stp[disabled] { opacity: .55; cursor: default; }
+.opts button[disabled] { opacity: .35; pointer-events: none; }
+
+/* أقسام بطاقة تقرير اليوم */
+.rsec + .rsec { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.rsec h4 { display: flex; align-items: center; gap: 8px; font-family: var(--f-ui); font-size: .84rem; font-weight: 600; color: var(--p); margin-bottom: 6px; }
+.rsec h4::before { content: ""; width: 6px; height: 6px; border-radius: 1.5px; transform: rotate(45deg); background: var(--logo-accent); }
+.rsec .tally { margin-bottom: 6px; }
