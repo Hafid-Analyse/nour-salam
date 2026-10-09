@@ -1,10 +1,11 @@
 /**
  * عامل الخدمة — السجل اليومي
  * • ملفات الواجهة: من الشبكة أولاً (أحدث نسخة دائماً)، ومن الذاكرة عند انقطاع الاتصال
- * • الأيقونات والخطوط: من الذاكرة أولاً (أسرع)
+ * • الأيقونات والخطوط ومكتبات الرسوم: من الذاكرة أولاً (أسرع)
+ * • يخدم التطبيقين: السجل اليومي (المعلمون) ولوحة المدير (director/)
  * • طلبات الخادم (Apps Script) لا تُخزَّن أبداً
  */
-const VERSION = 'ns-shell-v13';
+const VERSION = 'ns-shell-v14';
 const SHELL = [
   './', './index.html', './style.css', './app.js', './config.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'
@@ -28,9 +29,10 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
   const same = url.origin === self.location.origin;
   const font = /(^|\.)fonts\.(googleapis|gstatic)\.com$/.test(url.hostname);
-  if (!same && !font) return;
+  const lib = url.hostname === 'cdnjs.cloudflare.com';   // مكتبات بإصدار ثابت: لا تتغير أبداً
+  if (!same && !font && !lib) return;
 
-  const staticAsset = font || /\/icons\//.test(url.pathname);
+  const staticAsset = font || lib || /\/icons\//.test(url.pathname);
   e.respondWith(caches.open(VERSION).then(async cache => {
     const hit = await cache.match(req, { ignoreSearch: same });
     // ملفات الواجهة: تجاوز ذاكرة المتصفح والتحقق من الخادم في كل مرة (لا تبقى نسخة قديمة)
