@@ -125,7 +125,7 @@
   function syncChrome() {
     const dark = theme() === 'dark';
     $$('[data-act="theme"]').forEach(b => { b.innerHTML = ic(dark ? 'sun' : 'moon'); b.title = dark ? 'الوضع النهاري' : 'الوضع الليلي'; });
-    const m = $('meta[name="theme-color"]'); if (m) m.content = dark ? '#24060F' : '#7A1032';
+    const m = $('meta[name="theme-color"]'); if (m) m.content = dark ? '#071A3A' : '#1769CF';
     $$('[data-act="install"]').forEach(b => { b.hidden = standalone(); });
   }
 
