@@ -59,7 +59,8 @@
     send: '<path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/>',
     refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
-    wifi: '<path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M2 9a15 15 0 0 1 20 0M12 20h.01"/>'
+    wifi: '<path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M2 9a15 15 0 0 1 20 0M12 20h.01"/>',
+    download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>'
   };
   const ic = (n, c) => `<svg class="ic ${c || ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n] || ''}</svg>`;
   const logo = (kind, cls) => `<svg class="logo ${cls || ''}" aria-hidden="true"><use href="#logo-${kind}"/></svg>`;
@@ -101,7 +102,26 @@
     const dark = theme() === 'dark';
     $$('[data-act="theme"]').forEach(b => { b.innerHTML = ic(dark ? 'sun' : 'moon'); b.title = dark ? 'الوضع النهاري' : 'الوضع الليلي'; });
     const m = $('meta[name="theme-color"]'); if (m) m.content = dark ? '#22060E' : '#7A1032';
+    showInstall();
   }
+
+  /* ───────────── التثبيت كتطبيق (PWA) ───────────── */
+  let installEvt = null;
+  const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const canInstall = () => !standalone() && (!!installEvt || isIOS);
+  function showInstall() { $$('[data-act="install"]').forEach(b => { b.hidden = !canInstall(); }); }
+  async function install() {
+    if (installEvt) {
+      installEvt.prompt();
+      try { await installEvt.userChoice; } catch (e) {}
+      installEvt = null; showInstall();
+    } else if (isIOS) {
+      toast('من زر المشاركة ⬆️ اختر: إضافة إلى الشاشة الرئيسية', 'info');
+    }
+  }
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; showInstall(); });
+  window.addEventListener('appinstalled', () => { installEvt = null; showInstall(); toast('تم تثبيت السجل اليومي على جهازك', 'ok'); });
 
   /* ───────────── الاتصال بالخادم ───────────── */
   async function call(action, payload, retry) {
@@ -222,6 +242,7 @@
           <button class="btn btn-primary btn-cta" type="submit"><span>دخول</span><span class="cta-ic">${ic('next')}</span></button>
           <p class="form-err" id="loginErr"></p>
         </form>
+        <button class="btn btn-ghost install-btn" data-act="install" hidden>${ic('download')} تثبيت التطبيق على الهاتف</button>
         <p class="foot">يبقى دخولك محفوظاً على هذا الجهاز</p>
       </section>`;
     syncTheme();
@@ -255,6 +276,7 @@
         <header class="hero compact">
           <div class="topbar">
             <div class="brand on-hero">${logo('mark')} نور السلام</div>
+            <button class="icon-btn glass" data-act="install" hidden title="تثبيت التطبيق">${ic('download')}</button>
             <button class="icon-btn glass" data-act="theme"></button>
             <button class="icon-btn glass" data-act="logout" title="خروج">${ic('logout')}</button>
           </div>
@@ -300,11 +322,12 @@
           <div class="topbar">
             ${many ? `<button class="icon-btn glass" data-act="picker" title="تغيير القسم">${ic('grid')}</button>` : ''}
             <div class="brand on-hero">${logo('mark')} نور السلام</div>
+            <button class="icon-btn glass" data-act="install" hidden title="تثبيت التطبيق">${ic('download')}</button>
             <button class="icon-btn glass" data-act="theme"></button>
             <button class="icon-btn glass" data-act="logout" title="خروج">${ic('logout')}</button>
           </div>
           <div class="hero-title">
-            <p class="hello">السلام عليكم، ${esc(S.session.teacher.name)}</p>
+            <p class="hello">السلام عليكم،${esc(S.session.teacher.name)}</p>
             <h2>${esc(c.name)}</h2>
             <div class="pills">
               <span class="pill light">${esc(c.role)}</span>
@@ -642,6 +665,7 @@
     const act = b.dataset.act;
     switch (act) {
       case 'theme': return toggleTheme();
+      case 'install': return install();
       case 'logout': return logout(false);
       case 'picker': return renderPicker();
       case 'pick': return openClass(b.dataset.id);
@@ -757,4 +781,9 @@
   }
 
   boot();
+
+  // تسجيل عامل الخدمة (PWA): فتح فوري + عمل الواجهة دون اتصال
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  }
 })();

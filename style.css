@@ -90,6 +90,9 @@ input, textarea { font: inherit; color: inherit; }
 #app { max-width: 540px; margin: 0 auto; min-height: 100dvh; position: relative; }
 .ic { width: 20px; height: 20px; flex: none; }
 .muted { color: var(--muted); }
+[hidden] { display: none !important; }
+.install-btn { width: 100%; margin-top: 12px; }
+@media (display-mode: standalone) { .hero, .login { padding-top: calc(20px + env(safe-area-inset-top)); } }
 .logo { display: block; }
 
 /* ───────── الحركات ───────── */
