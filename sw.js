@@ -4,7 +4,7 @@
  * • الأيقونات والخطوط: من الذاكرة أولاً (أسرع)
  * • طلبات الخادم (Apps Script) لا تُخزَّن أبداً
  */
-const VERSION = 'ns-shell-v3';
+const VERSION = 'ns-shell-v4';
 const SHELL = [
   './', './index.html', './style.css', './app.js', './config.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'
@@ -33,7 +33,8 @@ self.addEventListener('fetch', e => {
   const staticAsset = font || /\/icons\//.test(url.pathname);
   e.respondWith(caches.open(VERSION).then(async cache => {
     const hit = await cache.match(req, { ignoreSearch: same });
-    const net = fetch(req).then(res => {
+    // ملفات الواجهة: تجاوز ذاكرة المتصفح والتحقق من الخادم في كل مرة (لا تبقى نسخة قديمة)
+    const net = fetch(same && !staticAsset ? new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : req).then(res => {
       if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone());
       return res;
     });
