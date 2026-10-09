@@ -448,3 +448,14 @@ textarea.inp { min-height: 110px; resize: vertical; }
 .offlink .ic { width: 17px; height: 17px; }
 .offcard .badge { background: linear-gradient(135deg, #F2B544, var(--warn)); }
 .offcard .chip.on { background: var(--warn); border-color: var(--warn); box-shadow: 0 6px 14px -8px var(--warn); }
+
+/* ───────── تذكير السجل اليومي ───────── */
+.tab .tdot { position: absolute; top: 9px; inset-inline-start: calc(50% + 6px); width: 9px; height: 9px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 2px var(--surface); transform: scale(0); transition: transform .3s var(--ease); }
+.tab.dot .tdot { transform: scale(1); }
+.tab.on .tdot { box-shadow: 0 0 0 2px #fff; }
+.nudge { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 14px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); border-inline-start: 4px solid var(--bad); box-shadow: var(--shadow); }
+.nudge > div { flex: 1; min-width: 0; }
+.nudge b { display: block; font-family: var(--f-ui); font-weight: 600; font-size: .95rem; }
+.nudge small { color: var(--muted); font-size: .8rem; }
+.nudge .badge { width: 36px; height: 36px; border-radius: 11px; background: linear-gradient(135deg, #F07186, var(--bad)); }
+.nudge .badge .ic { width: 18px; height: 18px; }

@@ -409,7 +409,7 @@
         ${main ? `
         <nav class="tabbar" id="tabbar">
           <span class="ind"></span>
-          ${TABS.map(t => `<button class="tab" data-act="tab" data-t="${t.id}">${ic(t.icon)}<span>${t.label}</span></button>`).join('')}
+          ${TABS.map(t => `<button class="tab" data-act="tab" data-t="${t.id}">${ic(t.icon)}<span>${t.label}</span><i class="tdot"></i></button>`).join('')}
         </nav>` : ''}
       </section>`;
     syncChrome(); renderDateBtn(); syncTabs();
@@ -483,9 +483,25 @@
     if (st === 'locked') body = stateLocked(part);
     else if (!formOpen(part)) body = reportCard(part);
     else body = part === 'att' ? formAtt() : part === 'rec' ? formRec() : formLog();
-    p.innerHTML = partHead(part) + (S.edit[part] ? editBanner(part) : '') + body;
+    p.innerHTML = partHead(part) + (S.edit[part] ? editBanner(part) : '') + logNudge(part) + body;
     renderSaveFab();
+    syncTabDots();
     if (st === 'last' && !formOpen(part) && !recOf(part)) loadReportBody(part);
+  }
+
+  /* تذكير السجل اليومي: الحضور أو الاستظهار مسجَّل لكن تقرير الدرس لهذا اليوم ناقص */
+  const logMissingToday = () => isMain() && status('log') === 'new';
+  function logNudge(part) {
+    if (part === 'log' || !logMissingToday() || formOpen(part) || status(part) !== 'last') return '';
+    return `<div class="nudge" style="--i:1">
+      <span class="badge">${ic('note')}</span>
+      <div><b>بقي السجل اليومي لهذا اليوم</b><small>لم يُكتب تقرير الدرس بعد</small></div>
+      <button class="btn btn-primary btn-sm" data-act="tab" data-t="log">اكتبه الآن</button>
+    </div>`;
+  }
+  /* نقطة حمراء على تبويب السجل اليومي عندما يكون ناقصاً للتاريخ المختار */
+  function syncTabDots() {
+    const b = $('.tab[data-t="log"]'); if (b) b.classList.toggle('dot', logMissingToday());
   }
 
   /* زر "تعديل آخر تقرير" في البداية — بدون تاريخ */
