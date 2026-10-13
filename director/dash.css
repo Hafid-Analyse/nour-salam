@@ -174,3 +174,35 @@ table.tch { width: 100%; border-collapse: collapse; font-family: var(--f-ui); fo
 .bar-in > div { min-width: 0; }
 @media (max-width: 560px) { .bar .tag { display: none; } .bar svg.logo { width: 32px; height: 43px; } .ibtn { width: 34px; height: 34px; } }
 
+
+/* ───────── الإصدار 4: جداول وأرقام + تقويم الفترة ───────── */
+.dates { display: flex; gap: 8px; flex-wrap: wrap; }
+.dates label { display: flex; align-items: center; gap: 6px; font-family: var(--f-ui); font-size: .8rem; color: var(--muted); }
+.dates input { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 10px; padding: 4px 8px; font-family: var(--f-ui); font-size: .85rem; min-width: 0; }
+.kpi .k-v small.of { font-size: .5em; font-weight: 500; color: var(--muted); }
+.kpi .k-s.bad { color: var(--bad); }
+table.tbl { width: 100%; border-collapse: collapse; font-family: var(--f-ui); font-size: .85rem; font-variant-numeric: tabular-nums; }
+.tbl th { font-weight: 500; color: var(--muted); font-size: .74rem; text-align: start; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.tbl td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl td.n { white-space: nowrap; }
+.tbl td.n small { color: var(--muted); font-size: .76em; }
+.tbl tbody tr:last-child td { border-bottom: 0; }
+.tbl tbody tr[data-k] { cursor: pointer; transition: background .15s; }
+.tbl tbody tr[data-k]:hover { background: var(--surface-2); }
+.tbl tbody tr[aria-selected="true"] { background: var(--p-soft); }
+.tbl td.nm { font-weight: 500; white-space: nowrap; }
+.tbl td.nm small { display: block; color: var(--muted); font-size: .72rem; font-weight: 400; }
+.tbl tfoot td { font-weight: 600; border-top: 2px solid var(--line); border-bottom: 0; white-space: nowrap; }
+.tbl .rk { color: var(--muted); width: 1%; }
+.tbl .zero { color: var(--bad); }
+.tbl .bad { color: var(--bad); font-weight: 600; }
+.tbl .warn { color: var(--warn); font-weight: 600; }
+.tbl .empty { color: var(--muted); text-align: center; padding: 14px; }
+.chips2 { display: flex; flex-wrap: wrap; gap: 4px; min-width: 180px; }
+.dchip { font-size: .72rem; border-radius: 99px; padding: 1px 8px; background: var(--bad-soft); color: var(--bad); white-space: nowrap; }
+.dchip.soft { background: var(--surface-2); color: var(--muted); }
+.more { margin-top: 8px; width: 100%; border: 1px dashed var(--line); background: none; color: var(--p); border-radius: 12px; padding: 8px; font-family: var(--f-ui); font-size: .85rem; }
+@media (max-width: 560px) {
+  .tabs { width: 100%; }
+  .tabs button { padding: 6px 8px; font-size: .82rem; flex: 1 1 0; min-width: 0; }
+}

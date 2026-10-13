@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Changa:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="dash.css?v=2">
+  <link rel="stylesheet" href="dash.css?v=4">
   <script>
     /* تطبيق الوضع المحفوظ قبل الرسم لتجنب الوميض */
     (function () { try { var t = JSON.parse(localStorage.getItem('nsd.theme')); if (t) document.documentElement.dataset.theme = t; } catch (e) {} })();
@@ -64,10 +64,15 @@
       <div class="tabs" id="tabs" role="group" aria-label="التقرير">
         <button type="button" data-t="att" aria-pressed="true">الحضور والاستظهار</button>
         <button type="button" data-t="q" aria-pressed="false">جودة التدريس</button>
+        <button type="button" data-t="ch" aria-pressed="false">الرسوم</button>
       </div>
     </div>
     <div class="frow">
-      <div class="seg" id="periods" role="group" aria-label="الفترة"></div>
+      <div class="dates">
+        <label><span>من</span><input type="date" id="f-d0"></label>
+        <label><span>إلى</span><input type="date" id="f-d1"></label>
+      </div>
+      <div class="seg" id="periods" role="group" aria-label="فترات جاهزة"></div>
     </div>
     <div class="frow">
       <div class="sel">
@@ -80,23 +85,77 @@
     <div class="active" id="active"></div>
   </section>
 
+  <!-- ① الحضور والاستظهار: أرقام وجداول -->
   <div class="view" id="v-att">
-  <section class="kpis" id="kpis" aria-label="المؤشرات"></section>
+    <section class="kpis" id="kpis" aria-label="المؤشرات"></section>
+    <section class="card">
+      <div class="c-h"><h2>الأقسام</h2><p>أرقام كل قسم في الفترة المختارة. اضغط على قسم لتصفية اللوحة به.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-cls"></table></div>
+    </section>
+    <section class="card">
+      <div class="c-h"><h2>التقارير التي لم تُرسل</h2><p>أيام دراسة (حسب البرنامج الأسبوعي، دون العطل) لم يُرسل فيها معلم القسم سجله. اليوم الجاري لا يُحسب قبل انتهائه.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-miss"></table></div>
+    </section>
+    <section class="card">
+      <div class="c-h"><h2>تلاميذ للمتابعة</h2><p>كل تلميذ غاب يوماً أو أكثر، من الأكثر غياباً إلى الأقل. اضغط على تلميذ لعرض أرقامه وحده.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-stu"></table></div>
+      <button class="more" id="stu-more" type="button" hidden></button>
+    </section>
+  </div>
 
-  <section class="card">
-    <div class="c-h">
-      <h2>الحضور والاستظهار أسبوعاً بأسبوع</h2>
-      <div class="legend">
-        <span><i style="background:var(--p)"></i>الحضور</span>
-        <span><i style="background:var(--p-3)"></i>الاستظهار</span>
-        <span><i class="box" style="background:var(--hol);border:1px solid var(--line)"></i>عطلة</span>
-      </div>
-      <p>اسحب طرفي الشريط أسفل الرسم لاختيار فترة، وكل ما في اللوحة يتبعها.</p>
+  <!-- ② جودة التدريس: أرقام وجداول -->
+  <div class="view" id="v-q" hidden>
+    <section class="kpis" id="kpis2" aria-label="مؤشرات جودة التدريس"></section>
+    <section class="card">
+      <div class="c-h"><h2>المعلمون</h2><p>عدد الدروس المسجلة لكل معلم وما استُعمل فيها. اضغط على معلم لتصفية اللوحة به.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-tch"></table></div>
+    </section>
+    <div class="grid2 even">
+      <section class="card">
+        <div class="c-h"><h2>الاستراتيجيات</h2><p>عدد الدروس التي استُعملت فيها كل استراتيجية. اضغط لتصفية الدروس بها.</p></div>
+        <div class="tbl-wrap"><table class="tbl" id="t-st"></table></div>
+      </section>
+      <section class="card">
+        <div class="c-h"><h2>مواد المنهاج</h2><p>عدد الدروس في كل مادة. اضغط لتصفية الدروس بها.</p></div>
+        <div class="tbl-wrap"><table class="tbl" id="t-sj"></table></div>
+      </section>
     </div>
-    <div id="tl" role="img" aria-label="رسم الحضور والاستظهار الأسبوعي"></div>
-  </section>
+    <div class="grid2 even">
+      <section class="card">
+        <div class="c-h"><h2>الوسائل التعليمية</h2><p>عدد الدروس التي استُعملت فيها كل وسيلة.</p></div>
+        <div class="tbl-wrap"><table class="tbl" id="t-to"></table></div>
+      </section>
+      <section class="card">
+        <div class="c-h"><h2>المهام المنجزة</h2><p>عدد الدروس التي أُنجزت فيها كل مهمة.</p></div>
+        <div class="tbl-wrap"><table class="tbl" id="t-tk"></table></div>
+      </section>
+    </div>
+    <div class="grid2 even">
+      <section class="card">
+        <div class="c-h"><h2>حصص القرآن</h2><p>في أقسام التلقين، حسب نوع الحصة.</p></div>
+        <div class="tbl-wrap"><table class="tbl" id="t-qr"></table></div>
+      </section>
+      <section class="card">
+        <div class="c-h"><h2>أيام لم تُقدَّم فيها حصة</h2><p>كما سجّلها المعلمون، مع التواريخ.</p></div>
+        <div class="tbl-wrap"><table class="tbl" id="t-off"></table></div>
+      </section>
+    </div>
+  </div>
 
-  <div class="grid2">
+  <!-- ③ الرسوم (لوقت لاحق) -->
+  <div class="view" id="v-ch" hidden>
+    <section class="card">
+      <div class="c-h">
+        <h2>الحضور والاستظهار أسبوعاً بأسبوع</h2>
+        <div class="legend">
+          <span><i style="background:var(--p)"></i>الحضور</span>
+          <span><i style="background:var(--p-3)"></i>الاستظهار</span>
+          <span><i class="box" style="background:var(--hol);border:1px solid var(--line)"></i>عطلة</span>
+        </div>
+        <p>اسحب طرفي الشريط أسفل الرسم لاختيار فترة.</p>
+      </div>
+      <div id="tl" role="img" aria-label="رسم الحضور والاستظهار الأسبوعي"></div>
+    </section>
     <section class="card">
       <div class="c-h">
         <h2>الأقسام</h2>
@@ -104,58 +163,27 @@
           <button type="button" data-m="att" aria-pressed="true">الحضور</button>
           <button type="button" data-m="rec" aria-pressed="false">الاستظهار</button>
         </div>
-        <p>اضغط على قسم لتصفية اللوحة به، واضغط مرة أخرى لإلغائه.</p>
+        <p>اضغط على قسم لتصفية اللوحة به.</p>
       </div>
       <div id="cls" role="img" aria-label="ترتيب الأقسام"></div>
-      <p class="ch-empty" id="cls-empty" hidden>لا توجد أسطر حضور في هذا الاختيار.</p>
     </section>
-    <div class="stack">
-      <section class="card">
-        <div class="c-h">
-          <h2>تلاميذ يحتاجون متابعة</h2>
-          <p>أعلى نسب الغياب في الفترة المختارة. اضغط على تلميذ لعرض بياناته وحده.</p>
-        </div>
-        <div class="list" id="warn"></div>
-      </section>
-      <section class="card">
-        <div class="c-h">
-          <h2>تقارير لم تُرسل</h2>
-          <p>معلمو الأقسام الأكثر تأخراً في إرسال السجل اليومي، حسب أيام الدراسة في البرنامج الأسبوعي.</p>
-        </div>
-        <div class="list" id="miss"></div>
-      </section>
-    </div>
-  </div>
-  </div>
-
-  <div class="view" id="v-q" hidden>
-    <section class="kpis" id="kpis2" aria-label="مؤشرات جودة التدريس"></section>
     <div class="grid2 even">
       <section class="card">
-        <div class="c-h"><h2>الاستراتيجيات المستعملة</h2>
-          <p>نسبة الدروس التي استُعملت فيها كل استراتيجية. اضغط على استراتيجية لتصفية الدروس بها.</p></div>
+        <div class="c-h"><h2>الاستراتيجيات</h2><p>نسبة الدروس التي استُعملت فيها كل استراتيجية.</p></div>
         <div id="q-st" role="img" aria-label="الاستراتيجيات"></div>
-        <p class="ch-empty" id="st-empty" hidden>لم تُسجَّل استراتيجيات في هذا الاختيار.</p>
       </section>
       <section class="card">
-        <div class="c-h"><h2>تغطية مواد المنهاج</h2>
-          <p>عدد الدروس في كل مادة. الأحمر لمادة تكاد لا تُدرَّس. اضغط على مادة لتصفية الدروس بها.</p></div>
+        <div class="c-h"><h2>مواد المنهاج</h2><p>عدد الدروس في كل مادة.</p></div>
         <div id="q-sj" role="img" aria-label="المواد"></div>
-        <p class="ch-empty" id="sj-empty" hidden>لا توجد مواد في هذا الاختيار.</p>
       </section>
     </div>
-    <section class="card">
-      <div class="c-h"><h2>المعلمون</h2>
-        <p id="w-note"></p></div>
-      <div class="tbl-wrap"><table class="tch" id="q-tch"></table></div>
-    </section>
     <div class="grid2 even">
       <section class="card">
-        <div class="c-h"><h2>حصص القرآن في أقسام التلقين</h2><p>التوازن بين التلقين والاستظهار والمراجعة.</p></div>
+        <div class="c-h"><h2>حصص القرآن</h2><p>التوازن بين أنواع الحصص.</p></div>
         <div id="q-qr" class="pie" role="img" aria-label="أنواع حصص القرآن"></div>
       </section>
       <section class="card">
-        <div class="c-h"><h2>أيام لم تُقدَّم فيها حصة</h2><p>الأسباب كما سجّلها المعلمون.</p></div>
+        <div class="c-h"><h2>أيام لم تُقدَّم فيها حصة</h2><p>حسب السبب.</p></div>
         <div id="q-off" class="pie" role="img" aria-label="أسباب عدم التدريس"></div>
       </section>
     </div>
@@ -168,6 +196,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/crossfilter2/1.5.4/crossfilter.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
   <script src="../config.js?v=13"></script>
-  <script src="dash.js?v=2"></script>
+  <script src="dash.js?v=4"></script>
 </body>
 </html>
