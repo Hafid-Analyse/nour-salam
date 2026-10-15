@@ -161,24 +161,20 @@ function load(raw) {
     }
   }
 
-  // الفترات الجاهزة (بالأيام)
-  const L = NDAYS - 1, td = new Date(TODAY * DAY);
-  const m0 = Math.round(Date.UTC(td.getUTCFullYear(), td.getUTCMonth(), 1) / DAY) - START;
-  PERIODS = [
-    { k: 'all', t: 'الموسم كاملاً', d: [FIRST, L] },
-    { k: 'today', t: 'اليوم', d: [L, L] },
-    { k: 'week', t: 'هذا الأسبوع', d: [Math.max(FIRST, wOf(L) * 7), L] },
-    { k: 'month', t: 'هذا الشهر', d: [Math.max(FIRST, m0), L] }
-  ];
-  const T = (raw.terms || []).map(x => x == null ? null : x - START);
-  if (T[0] != null && T[0] >= FIRST && T[0] < L) {
-    PERIODS.push({ k: 't1', t: 'الفصل الأول', d: [FIRST, T[0]] });
-    if (T[1] != null && T[1] > T[0]) {
-      PERIODS.push({ k: 't2', t: 'الفصل الثاني', d: [T[0] + 1, Math.min(T[1], L)] });
-      if (T[1] < L) PERIODS.push({ k: 't3', t: 'الفصل الثالث', d: [T[1] + 1, L] });
-    }
+  // يوم الإرسال لكل تقرير (للتأخر) + تقارير معلمي المواد
+  const delayOf = new Map();
+  subLogs = [];
+  for (const l of raw.logs) {
+    if (!inSeason(l[0])) continue;
+    const d = l[0] - START, dl = l[8] != null ? Math.max(0, l[8] - l[0]) : 0;
+    delayOf.set(d + '|' + l[1] + '|' + l[2], dl);
+    if (!l[3]) subLogs.push({ d, c: l[1], t: l[2], dl });
   }
-  if (RAM) PERIODS.push({ k: 'ram', t: 'رمضان', d: [Math.max(FIRST, RAM[0]), RAM[1]] });
+  for (const x of logs) x.dl = x.ok ? (delayOf.get(x.d + '|' + x.c + '|' + x.t) || 0) : null;
+
+  // التلاميذ المسجّلون في كل قسم
+  classStu = new Map();
+  raw.students.forEach((s, i) => { if (s.on === false || s.c == null || s.c < 0) return; (classStu.get(s.c) || classStu.set(s.c, []).get(s.c)).push(i); });
 
   // محرك الفلاتر
   cf = crossfilter(att);
@@ -194,18 +190,43 @@ function load(raw) {
   all2 = cf2.groupAll().reduce(add2, rem2, ini2);
   byT2 = tDim2.group().reduce(add2, rem2, ini2); bySj = sjDim.group().reduceCount(); bySt = stDim.group().reduceCount();
 }
+let subLogs = [], classStu = new Map();
 
-/* ───────── التواريخ ───────── */
+/* ───────── التواريخ والفترة ───────── */
 const WD = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 const iso = d => new Date((START + d) * DAY).toISOString().slice(0, 10);
 const fromIso = s => /^\d{4}-\d{2}-\d{2}$/.test(s) ? Math.round(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) / DAY) - START : null;
+const ymd = d => { const x = new Date((START + d) * DAY); return [x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate()]; };
+const dOf = (y, m, dd) => Math.round(Date.UTC(y, m, dd) / DAY) - START;
 const dShort = d => { const x = new Date((START + d) * DAY); return WD[x.getUTCDay()] + ' ' + x.getUTCDate() + ' ' + MONTHS[x.getUTCMonth()]; };
-const dTiny = d => { const x = new Date((START + d) * DAY); return x.getUTCDate() + ' ' + MONTHS[x.getUTCMonth()]; };
+const dTiny = d => { const [, m, dd] = ymd(d); return dd + ' ' + MONTHS[m]; };
+
+// الأسبوع من السبت إلى الجمعة (ترتيب أيام صفحة البرنامج الأسبوعي)
+function periodOf(unit, a) {
+  if (unit === 'day') return [a, a];
+  if (unit === 'week') { const s = a - ((wdOf(START + a) - 6 + 7) % 7); return [s, s + 6]; }
+  const [y, m] = ymd(a); return [dOf(y, m, 1), dOf(y, m + 1, 1) - 1];
+}
+function periodLabel() {
+  if (F.unit === 'day') return dShort(F.d0);
+  if (F.unit === 'month') { const [y, m] = ymd(F.d0); return MONTHS[m] + ' ' + y; }
+  return F.d0 === F.d1 ? dShort(F.d0) : dTiny(F.d0) + ' – ' + dTiny(F.d1);
+}
+function setPeriod(unit, anchor) { F.unit = unit; [F.d0, F.d1] = periodOf(unit, anchor); }
+function shiftPeriod(dir) {
+  if (F.unit === 'day') setPeriod('day', F.d0 + dir);
+  else if (F.unit === 'week') setPeriod('week', F.d0 + 7 * dir);
+  else if (F.unit === 'month') { const [y, m] = ymd(F.d0); setPeriod('month', dOf(y, m + dir, 1)); }
+  else { const len = F.d1 - F.d0 + 1; F.d0 += dir * len; F.d1 += dir * len; }
+}
+const canShift = dir => dir > 0 ? F.d1 < NDAYS - 1 : F.d0 > FIRST;
 
 /* ───────── الحالة ───────── */
-const F = { d0: 0, d1: 0, cls: null, tch: null, lvl: null, typ: null, stu: null, subj: null, strat: null };
-let metric = 'att', tab = 'att', loaded = false, ver = '', syncedAt = 0, stuAll = false;
-const STU_PAGE = 25;
+const F = { unit: 'month', d0: 0, d1: 0, cls: null, tch: null, lvl: null, typ: null, stu: null, subj: null, strat: null };
+let metric = 'att', tab = 'att', loaded = false, ver = '', syncedAt = 0;
+const more = { 't-stu': false, 't-rstu': false };
+const PAGE = 25;
+const TABS = { att: 'الحضور', rec: 'الاستظهار', rep: 'جودة التقارير', q: 'جودة التدريس', ch: 'الرسوم' };
 
 function allowedByOthers() {
   const s = new Set();
@@ -217,7 +238,6 @@ function allowedByOthers() {
   }
   return s;
 }
-
 function applyFilters() {
   const ok = allowedByOthers(), full = F.cls == null && ok.size === classes.length;
   const byC = c => ok.has(c) && (F.cls == null || c === F.cls);
@@ -231,48 +251,72 @@ function applyFilters() {
   F.strat == null ? stDim.filterAll() : stDim.filterExact(F.strat);
   return ok;
 }
-// سطر من السجل (تقرير مطلوب، حصة قرآن، يوم لم تُقدَّم) داخل الاختيار؟
 const selOf = (ok, withTeacher) => o => o.d >= F.d0 && o.d <= F.d1 && ok.has(o.c) && (F.cls == null || o.c === F.cls)
   && (!withTeacher || F.tch == null || o.t === F.tch) && (F.stu == null || o.c === students[F.stu].c);
 
-/* ───────── أدوات العرض ───────── */
+/* ───────── الجداول: بناء + فرز بالضغط على رأس العمود ───────── */
+// col: { h: العنوان, v: قيمة الفرز (null = غير قابل للفرز), c: محتوى الخلية, cls }
+const SORT = {};
+const cmp = (a, b) => {
+  if (a == null && b == null) return 0; if (a == null) return 1; if (b == null) return -1;
+  return typeof a === 'string' ? a.localeCompare(b, 'ar') : a - b;
+};
+function table(id, cols, data, o = {}) {
+  const st = SORT[id];
+  let rows = data;
+  if (st && cols[st.i] && cols[st.i].v) { const f = cols[st.i].v; rows = data.slice().sort((a, b) => { const x = f(a), y = f(b); return (x == null) - (y == null) || cmp(x, y) * st.dir; }); }
+  const lim = o.limit && !more[id] ? rows.slice(0, o.limit) : rows;
+  $(id).innerHTML = `<thead><tr>${cols.map((c, i) => `<th${c.v ? ` class="sortable" data-sort="${i}" title="اضغط للترتيب"` : ''}>${c.h}${st && st.i === i ? `<span class="arr">${st.dir < 0 ? '▼' : '▲'}</span>` : ''}</th>`).join('')}</tr></thead><tbody>`
+    + (lim.length ? lim.map((r, i) => `<tr ${o.attrs ? o.attrs(r) : ''}>${cols.map(c => `<td${c.cls ? ` class="${typeof c.cls === 'function' ? c.cls(r) : c.cls}"` : ''}>${c.c(r, i)}</td>`).join('')}</tr>`).join('')
+      : `<tr><td colspan="${cols.length}" class="empty">${o.empty || 'لا توجد بيانات في هذا الاختيار.'}</td></tr>`) + '</tbody>'
+    + (o.foot && rows.length > 1 ? `<tfoot><tr>${o.foot.map(f => `<td>${f}</td>`).join('')}</tr></tfoot>` : '');
+  if (o.limit) { const b = $(o.more); b.hidden = rows.length <= o.limit; b.textContent = more[id] ? 'عرض أول ' + o.limit + ' فقط' : 'عرض الكل (' + fmt(rows.length) + ')'; }
+}
+const of = (a, b) => `${fmt(a)}<small> / ${fmt(b)}</small>`;
+const rate = (a, b) => b ? a / b : null;
+const pctTxt = v => v == null ? '—' : (v * 100).toFixed(1) + '%';
+const sel = (k, v) => `data-k="${k}" data-v="${v}" aria-selected="${F[k] === v}" tabindex="0"`;
+const rank = { h: '#', v: null, c: (r, i) => i + 1, cls: 'rk' };
+const clsName = c => classes[c] ? esc(classes[c].name) : '';
+
 function kpiHTML(kp) {
   return kp.map(k => `<article class="kpi"><div class="k-h"><span class="k-l">${k.l}</span></div>
       <div class="k-v">${k.v}${k.of != null ? `<small class="of"> من ${k.of}</small>` : ''}</div>
       <div class="k-s${k.bad ? ' bad' : ''}">${k.s}</div></article>`).join('');
 }
-function table(id, head, rows, empty, foot) {
-  $(id).innerHTML = `<thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>`
-    + (rows.length ? rows.join('') : `<tr><td colspan="${head.length}" class="empty">${empty}</td></tr>`) + '</tbody>'
-    + (foot && rows.length > 1 ? `<tfoot><tr>${foot.map(f => `<td>${f}</td>`).join('')}</tr></tfoot>` : '');
-}
-const of = (a, b) => `${fmt(a)}<small> / ${fmt(b)}</small>`;
-const sel = (k, v) => `data-k="${k}" data-v="${v}" aria-selected="${F[k] === v}" tabindex="0"`;
 
-/* ───────── ① الحضور والاستظهار ───────── */
-// التواريخ: الأحدث أولاً. تظهر كلها عند اختيار المعلم، وإلا آخر 8 فقط
-const MAX_CHIPS = 8;
-function dateChips(days, full) {
-  const list = days.slice().sort((a, b) => b - a), shown = full ? list : list.slice(0, MAX_CHIPS);
-  return shown.map(d => `<span class="dchip">${dShort(d)}</span>`).join('')
-    + (list.length > shown.length ? `<span class="dchip soft">+${fmt(list.length - shown.length)} أخرى (اضغط لعرضها)</span>` : '');
-}
-function renderAtt(ok) {
-  // تجميع واحد على الأسطر المختارة: لكل قسم ولكل تلميذ
+/* ───────── تجميع الحضور والاستظهار (مرة واحدة على الأسطر المختارة) ───────── */
+function aggAtt() {
   let n = 0, ab = 0, l = 0, r = 0;
   const C = new Map(), Sx = new Map();
   for (const v of cf.allFiltered()) {
     n++; if (v.a === 2) ab++; else if (v.a === 1) l++; r += v.r;
     let c = C.get(v.c); if (!c) C.set(v.c, c = { n: 0, ab: 0, l: 0, r: 0, days: new Set(), stu: new Set() });
     c.n++; if (v.a === 2) c.ab++; else if (v.a === 1) c.l++; c.r += v.r; c.days.add(v.d); c.stu.add(v.s);
-    let s = Sx.get(v.s); if (!s) Sx.set(v.s, s = { n: 0, ab: 0, l: 0, r: 0, last: -1 });
-    s.n++; if (v.a === 2) { s.ab++; if (v.d > s.last) s.last = v.d; } else if (v.a === 1) s.l++; s.r += v.r;
+    let s = Sx.get(v.s); if (!s) Sx.set(v.s, s = { n: 0, ab: 0, l: 0, r: 0, lastAb: -1, lastNr: -1 });
+    s.n++;
+    if (v.a === 2) { s.ab++; if (v.d > s.lastAb) s.lastAb = v.d; }
+    else { if (v.a === 1) s.l++; if (v.r) s.r++; else if (v.d > s.lastNr) s.lastNr = v.d; }
   }
-  const rows = logs.filter(selOf(ok, true));
-  const sent = rows.reduce((a, x) => a + x.ok, 0);
-  const follow = [...Sx].filter(([, s]) => s.ab > 0).map(([id, s]) => ({ st: students[id], ...s }))
-    .sort((a, z) => z.ab - a.ab || (a.r / Math.max(1, a.n - a.ab)) - (z.r / Math.max(1, z.n - z.ab)) || z.n - a.n);
+  return { n, ab, l, r, C, Sx };
+}
+const EMPTY_C = () => ({ n: 0, ab: 0, l: 0, r: 0, days: new Set(), stu: new Set() });
+const EMPTY_S = () => ({ n: 0, ab: 0, l: 0, r: 0, lastAb: -1, lastNr: -1 });
+// تلاميذ القسم المختار: المسجّلون + من له أسطر فيه
+function classStudents(c, Sx) {
+  const ids = new Set(classStu.get(c) || []);
+  for (const id of Sx.keys()) if (students[id].c === c) ids.add(id);
+  if (F.stu != null) return ids.has(F.stu) ? [F.stu] : [];
+  return [...ids].map(id => ({ st: students[id], ...(Sx.get(id) || EMPTY_S()) }));
+}
+const regCount = c => (classStu.get(c) || []).length;
 
+/* ───────── ① الحضور ───────── */
+function renderAtt(ok) {
+  const { n, ab, l, r, C, Sx } = aggAtt();
+  const rows = logs.filter(selOf(ok, true)), sent = rows.reduce((a, x) => a + x.ok, 0);
+  const follow = [...Sx].filter(([, s]) => s.ab > 0).map(([id, s]) => ({ st: students[id], ...s }))
+    .sort((a, z) => z.ab - a.ab || rate(a.r, a.n - a.ab) - rate(z.r, z.n - z.ab) || z.n - a.n);
   $('kpis').innerHTML = kpiHTML([
     { l: 'الحضور', v: fmt(n - ab), of: fmt(n), s: `غياب: ${fmt(ab)} · تأخر: ${fmt(l)}` },
     { l: 'الاستظهار', v: fmt(r), of: fmt(n - ab) + ' حاضر', s: `لم يستظهر: ${fmt(n - ab - r)}` },
@@ -280,52 +324,155 @@ function renderAtt(ok) {
     { l: 'تلاميذ للمتابعة', v: fmt(follow.length), of: fmt(Sx.size) + ' تلميذ', s: 'غابوا يوماً أو أكثر', bad: follow.length > 0 }
   ]);
 
-  // جدول الأقسام
-  const rep = new Map();
-  for (const x of rows) { const q = rep.get(x.c) || { e: 0, s: 0 }; q.e++; q.s += x.ok; rep.set(x.c, q); }
-  const cls = classes.filter(c => ok.has(c.id) && (F.cls == null || c.id === F.cls) && (C.has(c.id) || rep.has(c.id)));
-  const tot = { st: 0, dy: 0, p: 0, ab: 0, l: 0, r: 0, e: 0, s: 0 };
-  table('t-cls', ['القسم', 'التلاميذ', 'أيام مسجّلة', 'حاضر', 'غائب', 'متأخر', 'استظهر', 'التقارير'],
-    cls.map(c => {
-      const g = C.get(c.id) || { n: 0, ab: 0, l: 0, r: 0, days: new Set(), stu: new Set() }, q = rep.get(c.id) || { e: 0, s: 0 };
-      tot.st += g.stu.size; tot.dy += g.days.size; tot.p += g.n - g.ab; tot.ab += g.ab; tot.l += g.l; tot.r += g.r; tot.e += q.e; tot.s += q.s;
-      return `<tr ${sel('cls', c.id)}><td class="nm">${esc(c.name)}<small>${esc(LV[c.lv])} · ${c.type}</small></td>
-        <td class="n">${fmt(g.stu.size)}</td><td class="n">${fmt(g.days.size)}</td><td class="n">${fmt(g.n - g.ab)}</td>
-        <td class="n${g.ab ? ' bad' : ''}">${fmt(g.ab)}</td><td class="n">${fmt(g.l)}</td><td class="n">${of(g.r, g.n - g.ab)}</td>
-        <td class="n${q.e > q.s ? ' bad' : ''}">${of(q.s, q.e)}</td></tr>`;
-    }), 'لا توجد بيانات في هذا الاختيار.',
-    ['المجموع', fmt(tot.st), fmt(tot.dy), fmt(tot.p), fmt(tot.ab), fmt(tot.l), of(tot.r, tot.p), of(tot.s, tot.e)]);
+  const cls = classes.filter(c => ok.has(c.id) && (F.cls == null || c.id === F.cls) && (C.has(c.id) || regCount(c.id)))
+    .map(c => ({ c, g: C.get(c.id) || EMPTY_C(), reg: regCount(c.id) }));
+  const T = cls.reduce((a, x) => ({ reg: a.reg + x.reg, dy: a.dy + x.g.days.size, n: a.n + x.g.n, ab: a.ab + x.g.ab, l: a.l + x.g.l }), { reg: 0, dy: 0, n: 0, ab: 0, l: 0 });
+  table('t-cls', [
+    { h: 'القسم', v: x => x.c.name, c: x => `${esc(x.c.name)}<small>${esc(LV[x.c.lv])} · ${x.c.type}</small>`, cls: 'nm' },
+    { h: 'عدد التلاميذ', v: x => x.reg, c: x => fmt(x.reg), cls: 'n' },
+    { h: 'أيام مسجّلة', v: x => x.g.days.size, c: x => fmt(x.g.days.size), cls: 'n' },
+    { h: 'حاضر', v: x => x.g.n - x.g.ab, c: x => fmt(x.g.n - x.g.ab), cls: 'n' },
+    { h: 'غائب', v: x => x.g.ab, c: x => fmt(x.g.ab), cls: x => 'n' + (x.g.ab ? ' bad' : '') },
+    { h: 'متأخر', v: x => x.g.l, c: x => fmt(x.g.l), cls: 'n' },
+    { h: 'نسبة الغياب', v: x => rate(x.g.ab, x.g.n), c: x => pctTxt(rate(x.g.ab, x.g.n)), cls: 'n' }
+  ], cls, { attrs: x => sel('cls', x.c.id), foot: ['المجموع', fmt(T.reg), fmt(T.dy), fmt(T.n - T.ab), fmt(T.ab), fmt(T.l), pctTxt(rate(T.ab, T.n))] });
 
-  // التقارير الناقصة: لكل (معلم، قسم) مع التواريخ
-  const mm = new Map();
-  for (const x of rows) {
-    const k = x.t + '|' + x.c; let q = mm.get(k);
-    if (!q) mm.set(k, q = { t: teachers[x.t], c: classes[x.c], e: 0, miss: [] });
-    q.e++; if (!x.ok) q.miss.push(x.d);
+  // عند اختيار قسم: كل تلاميذه
+  $('c-att-stu').hidden = F.cls == null;
+  if (F.cls != null) {
+    $('h-att-stu').textContent = 'تلاميذ ' + classes[F.cls].name;
+    const list = classStudents(F.cls, Sx).map(x => typeof x === 'number' ? { st: students[x], ...(Sx.get(x) || EMPTY_S()) } : x)
+      .sort((a, z) => z.ab - a.ab || a.st.name.localeCompare(z.st.name, 'ar'));
+    table('t-att-stu', [rank,
+      { h: 'التلميذ', v: x => x.st.name, c: x => esc(x.st.name), cls: 'nm' },
+      { h: 'أيام مسجّلة', v: x => x.n, c: x => fmt(x.n), cls: 'n' },
+      { h: 'حاضر', v: x => x.n - x.ab, c: x => fmt(x.n - x.ab), cls: 'n' },
+      { h: 'غائب', v: x => x.ab, c: x => fmt(x.ab), cls: x => 'n' + (x.ab ? ' bad' : '') },
+      { h: 'متأخر', v: x => x.l, c: x => fmt(x.l), cls: 'n' },
+      { h: 'نسبة الغياب', v: x => rate(x.ab, x.n), c: x => pctTxt(rate(x.ab, x.n)), cls: 'n' },
+      { h: 'آخر غياب', v: x => x.lastAb > -1 ? x.lastAb : null, c: x => x.lastAb > -1 ? dShort(x.lastAb) : '—', cls: 'n' }
+    ], list, { attrs: x => sel('stu', x.st.id), empty: 'لا يوجد تلاميذ مسجّلون في هذا القسم.' });
   }
-  const miss = [...mm.values()].filter(q => q.miss.length).sort((a, z) => z.miss.length - a.miss.length);
-  table('t-miss', ['المعلم', 'القسم', 'لم تُرسل', 'أُرسلت', 'التواريخ'],
-    miss.map(q => `<tr ${sel('tch', q.t.id)}><td class="nm">${esc(q.t.name)}</td><td class="nm">${esc(q.c.name)}</td>
-      <td class="n bad">${fmt(q.miss.length)}</td><td class="n">${of(q.e - q.miss.length, q.e)}</td>
-      <td><div class="chips2">${dateChips(q.miss, F.tch === q.t.id)}</div></td></tr>`),
-    rows.length ? 'كل التقارير المطلوبة أُرسلت في هذا الاختيار ✓' : 'لا توجد أيام دراسة في هذا الاختيار.');
 
-  // تلاميذ للمتابعة
-  const shown = stuAll ? follow : follow.slice(0, STU_PAGE);
-  table('t-stu', ['#', 'التلميذ', 'القسم', 'غاب', 'تأخر', 'استظهر', 'آخر غياب'],
-    shown.map((x, i) => { const rt = x.ab / x.n, tone = rt >= .2 ? 'bad' : rt >= .1 ? 'warn' : '';
-      return `<tr ${sel('stu', x.st.id)}><td class="rk">${i + 1}</td><td class="nm">${esc(x.st.name)}</td>
-        <td class="nm">${esc(classes[x.st.c] ? classes[x.st.c].name : '')}</td>
-        <td class="n ${tone}">${fmt(x.ab)}<small> من ${fmt(x.n)} يوماً</small></td><td class="n">${fmt(x.l)}</td>
-        <td class="n">${of(x.r, x.n - x.ab)}</td><td class="n">${x.last > -1 ? dShort(x.last) : '—'}</td></tr>`; }),
-    Sx.size ? 'لا يوجد تلميذ غائب في هذا الاختيار ✓' : 'لا توجد أسطر حضور في هذا الاختيار.');
-  const more = $('stu-more');
-  more.hidden = follow.length <= STU_PAGE;
-  more.textContent = stuAll ? 'عرض أول ' + STU_PAGE + ' فقط' : 'عرض الكل (' + fmt(follow.length) + ')';
+  table('t-stu', [rank,
+    { h: 'التلميذ', v: x => x.st.name, c: x => esc(x.st.name), cls: 'nm' },
+    { h: 'القسم', v: x => classes[x.st.c] ? classes[x.st.c].name : '', c: x => clsName(x.st.c), cls: 'nm' },
+    { h: 'غاب', v: x => x.ab, c: x => `${fmt(x.ab)}<small> من ${fmt(x.n)} يوماً</small>`, cls: x => 'n ' + (x.ab / x.n >= .2 ? 'bad' : x.ab / x.n >= .1 ? 'warn' : '') },
+    { h: 'تأخر', v: x => x.l, c: x => fmt(x.l), cls: 'n' },
+    { h: 'استظهر', v: x => x.r, c: x => of(x.r, x.n - x.ab), cls: 'n' },
+    { h: 'آخر غياب', v: x => x.lastAb, c: x => dShort(x.lastAb), cls: 'n' }
+  ], follow, { attrs: x => sel('stu', x.st.id), limit: PAGE, more: 'stu-more', empty: Sx.size ? 'لا يوجد تلميذ غائب في هذا الاختيار ✓' : 'لا توجد أسطر حضور في هذا الاختيار.' });
   return [n, att.length, 'سطر'];
 }
 
-/* ───────── ② جودة التدريس ───────── */
+/* ───────── ② الاستظهار ───────── */
+function renderRec(ok) {
+  const { n, ab, r, C, Sx } = aggAtt(), pr = n - ab;
+  const follow = [...Sx].map(([id, s]) => ({ st: students[id], ...s, nr: s.n - s.ab - s.r })).filter(x => x.nr > 0)
+    .sort((a, z) => z.nr - a.nr || rate(a.r, a.n - a.ab) - rate(z.r, z.n - z.ab));
+  $('kpis-rec').innerHTML = kpiHTML([
+    { l: 'الاستظهار', v: fmt(r), of: fmt(pr) + ' حاضر', s: 'مرات الاستظهار في الفترة' },
+    { l: 'لم يستظهر', v: fmt(pr - r), of: fmt(pr) + ' حاضر', s: 'حضر ولم يستظهر', bad: pr > r },
+    { l: 'الحاضرون', v: fmt(pr), of: fmt(n), s: `غياب: ${fmt(ab)} (لا يُحسب في الاستظهار)` },
+    { l: 'تلاميذ للمتابعة', v: fmt(follow.length), of: fmt(Sx.size) + ' تلميذ', s: 'لم يستظهروا مرة أو أكثر', bad: follow.length > 0 }
+  ]);
+  const cls = classes.filter(c => ok.has(c.id) && (F.cls == null || c.id === F.cls) && (C.has(c.id) || regCount(c.id)))
+    .map(c => { const g = C.get(c.id) || EMPTY_C(); return { c, g, reg: regCount(c.id), pr: g.n - g.ab }; });
+  const T = cls.reduce((a, x) => ({ reg: a.reg + x.reg, pr: a.pr + x.pr, r: a.r + x.g.r }), { reg: 0, pr: 0, r: 0 });
+  table('t-rcls', [
+    { h: 'القسم', v: x => x.c.name, c: x => `${esc(x.c.name)}<small>${esc(LV[x.c.lv])} · ${x.c.type}</small>`, cls: 'nm' },
+    { h: 'عدد التلاميذ', v: x => x.reg, c: x => fmt(x.reg), cls: 'n' },
+    { h: 'حاضر', v: x => x.pr, c: x => fmt(x.pr), cls: 'n' },
+    { h: 'استظهر', v: x => x.g.r, c: x => fmt(x.g.r), cls: 'n' },
+    { h: 'لم يستظهر', v: x => x.pr - x.g.r, c: x => fmt(x.pr - x.g.r), cls: x => 'n' + (x.pr > x.g.r ? ' bad' : '') },
+    { h: 'نسبة الاستظهار', v: x => rate(x.g.r, x.pr), c: x => pctTxt(rate(x.g.r, x.pr)), cls: 'n' }
+  ], cls, { attrs: x => sel('cls', x.c.id), foot: ['المجموع', fmt(T.reg), fmt(T.pr), fmt(T.r), fmt(T.pr - T.r), pctTxt(rate(T.r, T.pr))] });
+
+  $('c-rec-stu').hidden = F.cls == null;
+  if (F.cls != null) {
+    $('h-rec-stu').textContent = 'تلاميذ ' + classes[F.cls].name;
+    const list = classStudents(F.cls, Sx).map(x => typeof x === 'number' ? { st: students[x], ...(Sx.get(x) || EMPTY_S()) } : x)
+      .map(x => ({ ...x, pr: x.n - x.ab, nr: x.n - x.ab - x.r })).sort((a, z) => z.nr - a.nr || a.st.name.localeCompare(z.st.name, 'ar'));
+    table('t-rec-stu', [rank,
+      { h: 'التلميذ', v: x => x.st.name, c: x => esc(x.st.name), cls: 'nm' },
+      { h: 'حاضر', v: x => x.pr, c: x => fmt(x.pr), cls: 'n' },
+      { h: 'استظهر', v: x => x.r, c: x => fmt(x.r), cls: 'n' },
+      { h: 'لم يستظهر', v: x => x.nr, c: x => fmt(x.nr), cls: x => 'n' + (x.nr ? ' bad' : '') },
+      { h: 'نسبة الاستظهار', v: x => rate(x.r, x.pr), c: x => pctTxt(rate(x.r, x.pr)), cls: 'n' }
+    ], list, { attrs: x => sel('stu', x.st.id), empty: 'لا يوجد تلاميذ مسجّلون في هذا القسم.' });
+  }
+
+  table('t-rstu', [rank,
+    { h: 'التلميذ', v: x => x.st.name, c: x => esc(x.st.name), cls: 'nm' },
+    { h: 'القسم', v: x => classes[x.st.c] ? classes[x.st.c].name : '', c: x => clsName(x.st.c), cls: 'nm' },
+    { h: 'لم يستظهر', v: x => x.nr, c: x => `${fmt(x.nr)}<small> من ${fmt(x.n - x.ab)} حضوراً</small>`, cls: x => 'n ' + (x.nr / Math.max(1, x.n - x.ab) >= .5 ? 'bad' : 'warn') },
+    { h: 'استظهر', v: x => x.r, c: x => fmt(x.r), cls: 'n' },
+    { h: 'آخر مرة لم يستظهر', v: x => x.lastNr, c: x => x.lastNr > -1 ? dShort(x.lastNr) : '—', cls: 'n' }
+  ], follow, { attrs: x => sel('stu', x.st.id), limit: PAGE, more: 'rstu-more', empty: Sx.size ? 'كل الحاضرين استظهروا في هذا الاختيار ✓' : 'لا توجد أسطر حضور في هذا الاختيار.' });
+  return [n, att.length, 'سطر'];
+}
+
+/* ───────── ③ جودة التقارير ───────── */
+// في وقته: يوم الحصة أو الموالي ← 100 · بعد يومين ← 70 · ثلاثة فأكثر ← 40 · لم يُرسل ← 0
+const kindOf = dl => dl == null ? 'miss' : dl <= 1 ? 'ok' : 'late';
+const pts = dl => dl == null ? 0 : dl <= 1 ? 100 : dl === 2 ? 70 : 40;
+function renderRep(ok) {
+  const main = logs.filter(selOf(ok, true)), sub = subLogs.filter(selOf(ok, true));
+  const per = new Map();
+  const get = (t, c) => { const k = t + '|' + c; let q = per.get(k); if (!q) per.set(k, q = { t: teachers[t], c, e: 0, s: 0, ok: 0, late: 0, dsum: 0, psum: 0, pn: 0, items: [], main: false }); return q; };
+  for (const x of main) {
+    const q = get(x.t, x.c); q.main = true; q.e++; const k = kindOf(x.dl);
+    if (x.ok) { q.s++; q.dsum += x.dl; } if (k === 'ok') q.ok++; if (k === 'late') q.late++;
+    q.psum += pts(x.dl); q.pn++; q.items.push({ d: x.d, k, dl: x.dl });
+  }
+  for (const x of sub) {
+    const q = get(x.t, x.c), k = kindOf(x.dl);
+    q.s++; q.dsum += x.dl; if (k === 'ok') q.ok++; else q.late++; q.psum += pts(x.dl); q.pn++; q.items.push({ d: x.d, k, dl: x.dl });
+  }
+  // جدول المعلمين: تجميع كل أقسام المعلم
+  const byT = new Map();
+  for (const q of per.values()) {
+    let a = byT.get(q.t.id); if (!a) byT.set(q.t.id, a = { t: q.t, e: 0, s: 0, miss: 0, ok: 0, late: 0, dsum: 0, psum: 0, pn: 0, main: false, cls: new Set() });
+    a.miss += q.items.filter(i => i.k === 'miss').length; a.e += q.e; a.s += q.s; a.ok += q.ok; a.late += q.late; a.dsum += q.dsum; a.psum += q.psum; a.pn += q.pn; a.main = a.main || q.main; a.cls.add(q.c);
+  }
+  const T = [...byT.values()].map(a => ({ ...a, miss: a.main ? a.miss : null, score: a.pn ? a.psum / a.pn : null, avg: a.s ? a.dsum / a.s : null }));
+  T.sort((a, z) => (a.score ?? 101) - (z.score ?? 101));
+  const missAll = main.filter(x => !x.ok).length, okAll = [...per.values()].reduce((s, q) => s + q.ok, 0), lateAll = [...per.values()].reduce((s, q) => s + q.late, 0);
+  const sentMain = main.length - missAll;
+  $('kpis-rep').innerHTML = kpiHTML([
+    { l: 'التقارير المُرسلة', v: fmt(sentMain), of: fmt(main.length) + ' مطلوب', s: sub.length ? `+ ${fmt(sub.length)} من معلمي المواد` : 'من معلمي الأقسام' },
+    { l: 'في وقتها', v: fmt(okAll), s: 'في يوم الحصة أو اليوم الموالي' },
+    { l: 'متأخرة', v: fmt(lateAll), s: 'بعد يومين فأكثر', bad: lateAll > 0 },
+    { l: 'لم تُرسل', v: fmt(missAll), s: 'أيام دراسة بلا تقرير', bad: missAll > 0 }
+  ]);
+  const tt = T.reduce((a, x) => ({ e: a.e + x.e, s: a.s + x.s, miss: a.miss + (x.miss || 0), ok: a.ok + x.ok, late: a.late + x.late, dsum: a.dsum + x.dsum, psum: a.psum + x.psum, pn: a.pn + x.pn }), { e: 0, s: 0, miss: 0, ok: 0, late: 0, dsum: 0, psum: 0, pn: 0 });
+  const tone = v => v == null ? '' : v >= 90 ? '' : v >= 70 ? ' warn' : ' bad';
+  table('t-rep', [
+    { h: 'المعلم', v: x => x.t.name, c: x => `${esc(x.t.name)}<small>${x.t.role} · ${[...x.cls].map(clsName).join('، ')}</small>`, cls: 'nm' },
+    { h: 'المطلوبة', v: x => x.main ? x.e : null, c: x => x.main ? fmt(x.e) : '—', cls: 'n' },
+    { h: 'مُرسلة', v: x => x.s, c: x => fmt(x.s), cls: 'n' },
+    { h: 'غير مُرسلة', v: x => x.miss, c: x => x.miss == null ? '—' : fmt(x.miss), cls: x => 'n' + (x.miss ? ' bad' : '') },
+    { h: 'في وقتها', v: x => x.ok, c: x => fmt(x.ok), cls: 'n' },
+    { h: 'متأخرة', v: x => x.late, c: x => fmt(x.late), cls: x => 'n' + (x.late ? ' warn' : '') },
+    { h: 'متوسط التأخر', v: x => x.avg, c: x => x.avg == null ? '—' : x.avg.toFixed(1) + '<small> يوم</small>', cls: 'n' },
+    { h: 'درجة الجودة', v: x => x.score, c: x => x.score == null ? '—' : `<b>${x.score.toFixed(0)}</b><small> / 100</small>`, cls: x => 'n' + tone(x.score) }
+  ], T, { attrs: x => sel('tch', x.t.id), empty: 'لا توجد تقارير مطلوبة أو مُرسلة في هذا الاختيار.',
+    foot: ['المجموع', fmt(tt.e), fmt(tt.s), fmt(tt.miss), fmt(tt.ok), fmt(tt.late), tt.s ? (tt.dsum / tt.s).toFixed(1) + ' يوم' : '—', tt.pn ? (tt.psum / tt.pn).toFixed(0) + ' / 100' : '—'] });
+
+  // جدول التواريخ الملونة لكل (معلم، قسم)
+  const D = [...per.values()].map(q => ({ ...q, miss: q.items.filter(i => i.k === 'miss').length }));
+  const chip = i => `<span class="dchip ${i.k === 'ok' ? 'ok' : i.k === 'late' ? 'late' : ''}" title="${i.k === 'miss' ? 'لم يُرسل' : i.dl === 0 ? 'أُرسل في يومه' : 'أُرسل بعد ' + i.dl + ' يوم'}">${dShort(i.d)}${i.k === 'late' ? ' · +' + i.dl : ''}</span>`;
+  table('t-repd', [
+    { h: 'المعلم', v: x => x.t.name, c: x => `${esc(x.t.name)}<small>${x.t.role}</small>`, cls: 'nm' },
+    { h: 'القسم', v: x => classes[x.c] ? classes[x.c].name : '', c: x => clsName(x.c), cls: 'nm' },
+    { h: 'لم يُرسل', v: x => x.miss, c: x => fmt(x.miss), cls: x => 'n' + (x.miss ? ' bad' : '') },
+    { h: 'متأخر', v: x => x.late, c: x => fmt(x.late), cls: x => 'n' + (x.late ? ' warn' : '') },
+    { h: 'التواريخ', v: null, c: x => `<div class="chips2">${x.items.sort((a, b) => a.d - b.d).map(chip).join('')}</div>` }
+  ], D.sort((a, z) => z.miss - a.miss || z.late - a.late), { attrs: x => sel('tch', x.t.id), empty: 'لا توجد تقارير في هذا الاختيار.' });
+  return [main.length + sub.length, logs.length + subLogs.length, 'تقرير'];
+}
+
+/* ───────── ④ جودة التدريس ───────── */
 function renderQual(ok) {
   let n = 0, to = 0, ia = 0;
   const TOc = new Map(), TKc = new Map();
@@ -342,72 +489,70 @@ function renderQual(ok) {
     { l: 'دروس تفاعلية', v: fmt(ia), of: fmt(n), s: tradNames ? 'فيها استراتيجية غير ' + esc(tradNames) : 'فيها استراتيجية واحدة على الأقل' },
     { l: 'أيام لم تُقدَّم فيها حصة', v: fmt(offRows.length), s: offRows.length ? 'التفاصيل في الجدول أسفله' : 'لا يوجد في هذا الاختيار', bad: offRows.length > 0 }
   ]);
-
-  // المعلمون (لا يتأثر الجدول بفلتر المعلم نفسه ليبقى للمقارنة)
   const offT = new Map();
   for (const o of offs.filter(selOf(ok, false))) offT.set(o.t, (offT.get(o.t) || 0) + 1);
   const T2 = new Map(byT2.all().filter(g => g.value.n > 0).map(g => [g.key, g.value]));
-  const tIds = [...new Set([...T2.keys(), ...offT.keys()])];
-  const tr = tIds.map(id => ({ t: teachers[id], p: T2.get(id) || { n: 0, st: 0, to: 0, ia: 0 }, off: offT.get(id) || 0 })).sort((a, z) => z.p.n - a.p.n);
+  const tr = [...new Set([...T2.keys(), ...offT.keys()])].map(id => ({ t: teachers[id], p: Object.assign({ n: 0, st: 0, to: 0, ia: 0 }, T2.get(id)), off: offT.get(id) || 0 })).sort((a, z) => z.p.n - a.p.n);
   const tt = tr.reduce((a, x) => ({ n: a.n + x.p.n, to: a.to + x.p.to, ia: a.ia + x.p.ia, st: a.st + x.p.st, off: a.off + x.off }), { n: 0, to: 0, ia: 0, st: 0, off: 0 });
-  table('t-tch', ['المعلم', 'الدروس', 'بوسيلة', 'تفاعلية', 'استراتيجيات مستعملة', 'أيام لم تُقدَّم'],
-    tr.map(x => `<tr ${sel('tch', x.t.id)}><td class="nm">${esc(x.t.name)}<small>${x.t.role}</small></td><td class="n">${fmt(x.p.n)}</td>
-      <td class="n">${of(x.p.to, x.p.n)}</td><td class="n">${of(x.p.ia, x.p.n)}</td><td class="n">${fmt(x.p.st)}</td>
-      <td class="n${x.off ? ' warn' : ''}">${fmt(x.off)}</td></tr>`),
-    'لا توجد دروس في هذا الاختيار.', ['المجموع', fmt(tt.n), of(tt.to, tt.n), of(tt.ia, tt.n), fmt(tt.st), fmt(tt.off)]);
+  table('t-tch', [
+    { h: 'المعلم', v: x => x.t.name, c: x => `${esc(x.t.name)}<small>${x.t.role}</small>`, cls: 'nm' },
+    { h: 'الدروس', v: x => x.p.n, c: x => fmt(x.p.n), cls: 'n' },
+    { h: 'بوسيلة', v: x => x.p.to, c: x => of(x.p.to, x.p.n), cls: 'n' },
+    { h: 'تفاعلية', v: x => x.p.ia, c: x => of(x.p.ia, x.p.n), cls: 'n' },
+    { h: 'استراتيجيات مستعملة', v: x => x.p.st, c: x => fmt(x.p.st), cls: 'n' },
+    { h: 'أيام لم تُقدَّم', v: x => x.off, c: x => fmt(x.off), cls: x => 'n' + (x.off ? ' warn' : '') }
+  ], tr, { attrs: x => sel('tch', x.t.id), empty: 'لا توجد دروس في هذا الاختيار.', foot: ['المجموع', fmt(tt.n), of(tt.to, tt.n), of(tt.ia, tt.n), fmt(tt.st), fmt(tt.off)] });
 
-  // الاستراتيجيات (لا يتأثر بفلتر الاستراتيجية نفسه)
   const stc = new Map(bySt.all().map(g => [g.key, g.value]));
-  const stRows = ST.map((nm, i) => ({ i, nm, c: stc.get(i) || 0 })).sort((a, z) => z.c - a.c);
-  table('t-st', ['الاستراتيجية', 'الدروس'], stRows.map(x => `<tr ${sel('strat', x.i)}><td class="nm">${esc(x.nm)}${TRAD.has(x.i) ? '<small>تقليدية</small>' : ''}</td>
-    <td class="n${x.c ? '' : ' zero'}">${fmt(x.c)}</td></tr>`), 'لا توجد استراتيجيات في القوائم.');
+  table('t-st', [
+    { h: 'الاستراتيجية', v: x => x.nm, c: x => esc(x.nm) + (TRAD.has(x.i) ? '<small>تقليدية</small>' : ''), cls: 'nm' },
+    { h: 'الدروس', v: x => x.c, c: x => fmt(x.c), cls: x => 'n' + (x.c ? '' : ' zero') }
+  ], ST.map((nm, i) => ({ i, nm, c: stc.get(i) || 0 })).sort((a, z) => z.c - a.c), { attrs: x => sel('strat', x.i), empty: 'لا توجد استراتيجيات في القوائم.' });
 
-  // المواد: مواد منهاج المستويات المختارة + أي مادة دُرّست
   const lvs = new Set([...ok].filter(c => F.cls == null || c === F.cls).map(c => classes[c].lv));
   const cnt = new Map(bySj.all().filter(g => g.value > 0).map(g => [g.key, g.value]));
-  const subs = [...new Set([...lvs].flatMap(CUR).concat([...cnt.keys()]))].map(k => ({ k, c: cnt.get(k) || 0 })).sort((a, z) => z.c - a.c);
-  table('t-sj', ['المادة', 'الدروس'], subs.map(x => `<tr ${sel('subj', x.k)}><td class="nm">${esc(SJ[x.k])}</td>
-    <td class="n${x.c ? '' : ' zero'}">${x.c ? fmt(x.c) : '0 · لم تُدرَّس'}</td></tr>`), 'لا توجد مواد في هذا الاختيار.');
+  table('t-sj', [
+    { h: 'المادة', v: x => SJ[x.k], c: x => esc(SJ[x.k]), cls: 'nm' },
+    { h: 'الدروس', v: x => x.c, c: x => x.c ? fmt(x.c) : '0 · لم تُدرَّس', cls: x => 'n' + (x.c ? '' : ' zero') }
+  ], [...new Set([...lvs].flatMap(CUR).concat([...cnt.keys()]))].map(k => ({ k, c: cnt.get(k) || 0 })).sort((a, z) => z.c - a.c),
+  { attrs: x => sel('subj', x.k), empty: 'لا توجد مواد في هذا الاختيار.' });
 
-  const cntTable = (id, names, map, head) => table(id, [head, 'الدروس'],
-    names.map((nm, i) => ({ nm, c: map.get(i) || 0 })).sort((a, z) => z.c - a.c)
-      .map(x => `<tr><td class="nm">${esc(x.nm)}</td><td class="n${x.c ? '' : ' zero'}">${fmt(x.c)}</td></tr>`), 'القائمة فارغة في الشيت.');
+  const cntTable = (id, names, map, head) => table(id, [
+    { h: head, v: x => x.nm, c: x => esc(x.nm), cls: 'nm' },
+    { h: 'الدروس', v: x => x.c, c: x => fmt(x.c), cls: x => 'n' + (x.c ? '' : ' zero') }
+  ], names.map((nm, i) => ({ nm, c: map.get(i) || 0 })).sort((a, z) => z.c - a.c), { empty: 'القائمة فارغة في الشيت.' });
   cntTable('t-to', TO, TOc, 'الوسيلة');
-  cntTable('t-tk', raw_TK(), TKc, 'المهمة');
+  cntTable('t-tk', TKN, TKc, 'المهمة');
 
-  table('t-qr', ['نوع الحصة', 'الحصص'], QT.map((nm, i) => ({ nm, c: qRows.filter(q => q.q === i).length }))
-    .map(x => `<tr><td class="nm">${esc(x.nm)}</td><td class="n${x.c ? '' : ' zero'}">${fmt(x.c)}</td></tr>`), 'لا توجد أنواع حصص في القوائم.',
-    ['المجموع', fmt(qRows.length)]);
+  table('t-qr', [
+    { h: 'نوع الحصة', v: x => x.nm, c: x => esc(x.nm), cls: 'nm' },
+    { h: 'الحصص', v: x => x.c, c: x => fmt(x.c), cls: x => 'n' + (x.c ? '' : ' zero') }
+  ], QT.map((nm, i) => ({ nm, c: qRows.filter(q => q.q === i).length })), { empty: 'لا توجد أنواع حصص في القوائم.', foot: ['المجموع', fmt(qRows.length)] });
 
-  table('t-off', ['السبب', 'الأيام', 'التواريخ'], OFFR.map((nm, i) => ({ nm, list: offRows.filter(o => o.r === i).sort((a, b) => a.d - b.d) }))
-    .filter(x => x.list.length).sort((a, z) => z.list.length - a.list.length)
-    .map(x => `<tr><td class="nm">${esc(x.nm)}</td><td class="n warn">${fmt(x.list.length)}</td>
-      <td><div class="chips2">${x.list.map(o => `<span class="dchip soft">${dTiny(o.d)} · ${esc(classes[o.c].name)}</span>`).join('')}</div></td></tr>`),
-    'لم يُسجَّل أي يوم بلا حصة في هذا الاختيار ✓');
+  table('t-off', [
+    { h: 'السبب', v: x => x.nm, c: x => esc(x.nm), cls: 'nm' },
+    { h: 'الأيام', v: x => x.list.length, c: x => fmt(x.list.length), cls: 'n warn' },
+    { h: 'التواريخ', v: null, c: x => `<div class="chips2">${x.list.map(o => `<span class="dchip soft">${dTiny(o.d)} · ${clsName(o.c)}</span>`).join('')}</div>` }
+  ], OFFR.map((nm, i) => ({ nm, list: offRows.filter(o => o.r === i).sort((a, b) => a.d - b.d) })).filter(x => x.list.length).sort((a, z) => z.list.length - a.list.length),
+  { empty: 'لم يُسجَّل أي يوم بلا حصة في هذا الاختيار ✓' });
   return [n, lessons.length, 'درس'];
 }
 let TKN = [];
-const raw_TK = () => TKN;
 
-/* ───────── ③ الرسوم ───────── */
+/* ───────── ⑤ الرسوم ───────── */
 let tl, cl, stc, sjc, qrc, offc;
 const chartBase = () => ({ animationDuration: 300, animationDurationUpdate: 260, textStyle: { fontFamily: 'Changa, system-ui, sans-serif', color: css('--muted') } });
 const tipBox = () => ({ backgroundColor: css('--surface'), borderColor: css('--line'), textStyle: { color: css('--ink'), fontFamily: 'Changa, sans-serif', fontSize: 12 }, extraCssText: 'box-shadow:' + css('--shadow') + ';border-radius:12px;direction:rtl;text-align:right' });
-
 function buildTimeline() {
   const p = css('--p'), p3 = css('--p-3');
   const area = c => ({ type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: c + '33' }, { offset: 1, color: c + '00' }] });
   const marks = holWeeks.map(h => [{ name: h[2], xAxis: weeks[h[0]] }, { xAxis: weeks[h[1]] }]);
   if (RAM) marks.push([{ name: 'رمضان', xAxis: weeks[wOf(RAM[0])], itemStyle: { color: css('--ram') } }, { xAxis: weeks[wOf(RAM[1])] }]);
   tl.setOption(Object.assign(chartBase(), {
-    grid: { top: 14, right: 40, left: 26, bottom: 58 },
+    grid: { top: 14, right: 40, left: 26, bottom: 24 },
     tooltip: Object.assign(tipBox(), { trigger: 'axis', valueFormatter: v => v == null ? '—' : v.toFixed(1) + '%' }),
     xAxis: { type: 'category', data: weeks, inverse: true, boundaryGap: false, axisLine: { lineStyle: { color: css('--line') } }, axisTick: { show: false }, axisLabel: { color: css('--muted'), fontSize: 11, hideOverlap: true } },
     yAxis: { type: 'value', position: 'right', min: 0, max: 100, interval: 25, splitLine: { lineStyle: { color: css('--grid') } }, axisLabel: { color: css('--muted'), formatter: '{value}%', fontSize: 11 } },
-    dataZoom: [{ type: 'slider', xAxisIndex: 0, startValue: wOf(F.d0), endValue: wOf(F.d1), height: 22, bottom: 8, brushSelect: false, minValueSpan: 0,
-      borderColor: css('--line'), backgroundColor: css('--surface-2'), fillerColor: css('--ring'), dataBackground: { lineStyle: { color: p, opacity: .4 }, areaStyle: { color: p, opacity: .08 } },
-      selectedDataBackground: { lineStyle: { color: p }, areaStyle: { color: p, opacity: .15 } },
-      handleStyle: { color: css('--surface'), borderColor: p }, moveHandleStyle: { color: p, opacity: .5 }, textStyle: { color: css('--muted'), fontSize: 11 }, labelFormatter: i => weeks[i] || '' }],
     series: [
       { name: 'الحضور', type: 'line', smooth: .3, symbol: 'circle', symbolSize: 6, showSymbol: NW < 3, connectNulls: false, lineStyle: { width: 2.5, color: p }, itemStyle: { color: p }, areaStyle: { color: area(p) }, data: [],
         markArea: { silent: true, itemStyle: { color: css('--hol') }, label: { show: innerWidth > 560, color: css('--muted'), fontSize: 11, position: 'insideTop' }, data: marks } },
@@ -450,30 +595,22 @@ function ensureCharts() {
   cl.on('click', q => { const id = q.data && q.data.key; if (id == null) return; F.cls = F.cls === id ? null : id; F.stu = null; render(); });
   stc.on('click', q => { if (q.data.key == null) return; F.strat = F.strat === q.data.key ? null : q.data.key; render(); });
   sjc.on('click', q => { if (q.data.key == null) return; F.subj = F.subj === q.data.key ? null : q.data.key; render(); });
-  let raf = 0;
-  tl.on('datazoom', () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => {
-    const z = tl.getOption().dataZoom[0], a = Math.max(0, Math.round(z.startValue)), b = Math.min(NW - 1, Math.round(z.endValue));
-    const d0 = Math.max(FIRST, a * 7), d1 = Math.min(NDAYS - 1, b * 7 + 6);
-    if (d0 === F.d0 && d1 === F.d1) return; F.d0 = d0; F.d1 = d1; render('zoom'); }); });
   const ro = new ResizeObserver(() => [tl, cl, stc, sjc, qrc, offc].forEach(c => c.resize()));
   ['tl', 'cls', 'q-st', 'q-sj', 'q-qr', 'q-off'].forEach(id => ro.observe($(id).parentElement));
 }
-function renderCharts(ok, reason) {
+function renderCharts(ok) {
   ensureCharts();
   [tl, cl, stc, sjc, qrc, offc].forEach(c => c.resize());
-  if (reason !== 'zoom') {
-    tl.setOption({ dataZoom: [{ startValue: wOf(F.d0), endValue: wOf(F.d1) }] });
-    const wk = Array.from({ length: NW }, () => [null, null]);
-    for (const g of byWeek.all()) if (g.value.n && g.key < NW) wk[g.key] = [+(attR(g.value) * 100).toFixed(2), recR(g.value) == null ? null : +(recR(g.value) * 100).toFixed(2)];
-    tl.setOption({ series: [{ data: wk.map(x => x[0]) }, { data: wk.map(x => x[1]) }] });
-  }
+  // الخط الزمني يعرض الموسم كله (سياق)، والفترة المختارة تؤثر في باقي الرسوم
+  const wk = Array.from({ length: NW }, () => [null, null]);
+  for (const g of byWeek.all()) if (g.value.n && g.key < NW) wk[g.key] = [+(attR(g.value) * 100).toFixed(2), recR(g.value) == null ? null : +(recR(g.value) * 100).toFixed(2)];
+  tl.setOption({ series: [{ data: wk.map(x => x[0]) }, { data: wk.map(x => x[1]) }] });
   const p = css('--p'), w = css('--warn'), b = css('--bad'), mu = css('--muted');
   const fn = metric === 'att' ? attR : recR, th = metric === 'att' ? [.92, .85] : [.75, .6];
   const cs = byCls.all().filter(g => ok.has(g.key) && g.value.n).map(g => ({ c: classes[g.key], v: fn(g.value), g: g.value })).filter(x => x.v != null).sort((a, z) => z.v - a.v);
   setBars(cl, cs.map(x => ({ value: x.v * 100, key: x.c.id, name: x.c.name, lbl: (x.v * 100).toFixed(1) + '%',
     itemStyle: { color: x.v >= th[0] ? p : x.v >= th[1] ? w : b, opacity: F.cls != null && x.c.id !== F.cls ? .28 : 1 },
     tip: `<b>${esc(x.c.name)}</b><br>حاضر ${fmt(x.g.n - x.g.ab)} من ${fmt(x.g.n)} · استظهر ${fmt(x.g.r)}` })), 100);
-
   let base = all2.value().n;
   if (F.strat != null) { stDim.filterAll(); base = all2.value().n; stDim.filterExact(F.strat); }
   const st = bySt.all().filter(g => g.value > 0).map(g => ({ key: g.key, v: base ? g.value / base : 0, n: g.value })).sort((a, z) => z.v - a.v);
@@ -489,11 +626,12 @@ function renderCharts(ok, reason) {
 }
 
 /* ───────── الرسم العام ───────── */
-function render(reason) {
+const RENDER = { att: renderAtt, rec: renderRec, rep: renderRep, q: renderQual, ch: renderCharts };
+function render() {
   if (!loaded) return;
   const t0 = performance.now();
   const ok = applyFilters();
-  const [a, z, u] = tab === 'att' ? renderAtt(ok) : tab === 'q' ? renderQual(ok) : renderCharts(ok, reason);
+  const [a, z, u] = RENDER[tab](ok);
   renderActive();
   const ms = performance.now() - t0, sp = $('speed');
   sp.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>أُعيد الحساب في <b>${ms.toFixed(1)} مللي ثانية</b> على ${fmt(a)} من ${fmt(z)} ${u}`;
@@ -509,18 +647,17 @@ function fillSelects() {
   $('f-tch').innerHTML = opt('', 'كل المعلمين') + tv.map(t => opt(t.id, t.name)).join('');
   $('f-lvl').innerHTML = opt('', 'كل المستويات') + LV.map((l, i) => classes.some(c => c.lv === i) ? opt(i, l) : '').join('');
   $('f-typ').innerHTML = opt('', 'تلقين ومنافسة') + opt('تلقين', 'تلقين') + opt('منافسة', 'منافسة');
-  $('periods').innerHTML = PERIODS.map(p => `<button type="button" data-p="${p.k}" aria-pressed="false">${p.t}</button>`).join('');
   for (const id of ['f-d0', 'f-d1']) { $(id).min = iso(FIRST); $(id).max = iso(NDAYS - 1); }
 }
 function syncSelects() {
   $('f-cls').value = F.cls ?? ''; $('f-tch').value = F.tch ?? ''; $('f-lvl').value = F.lvl ?? ''; $('f-typ').value = F.typ ?? '';
-  $('f-d0').value = iso(F.d0); $('f-d1').value = iso(F.d1);
-  for (const b of $('periods').children) { const p = PERIODS.find(x => x.k === b.dataset.p); b.setAttribute('aria-pressed', p.d[0] === F.d0 && p.d[1] === F.d1); }
+  $('f-d0').value = iso(Math.max(FIRST, F.d0)); $('f-d1').value = iso(Math.min(NDAYS - 1, F.d1));
+  for (const b of $('units').children) b.setAttribute('aria-pressed', b.dataset.u === F.unit);
+  $('p-label').textContent = periodLabel();
+  $('p-prev').disabled = !canShift(-1); $('p-next').disabled = !canShift(1);
 }
 function renderActive() {
   const ch = [];
-  const per = PERIODS.find(p => p.d[0] === F.d0 && p.d[1] === F.d1);
-  if (!per || per.k !== 'all') ch.push(['d', 'الفترة', per ? per.t : (F.d0 === F.d1 ? dShort(F.d0) : 'من ' + dShort(F.d0) + ' إلى ' + dShort(F.d1))]);
   if (F.cls != null) ch.push(['cls', 'القسم', classes[F.cls].name]);
   if (F.tch != null) ch.push(['tch', 'المعلم', teachers[F.tch].name]);
   if (F.lvl != null) ch.push(['lvl', 'المستوى', LV[F.lvl]]);
@@ -533,15 +670,20 @@ function renderActive() {
     + '<span class="speed" id="speed"></span>';
   syncSelects();
 }
-function setRange(d0, d1) {
-  d0 = Math.max(FIRST, Math.min(NDAYS - 1, d0)); d1 = Math.max(FIRST, Math.min(NDAYS - 1, d1));
-  if (d0 > d1) [d0, d1] = [d1, d0];
-  F.d0 = d0; F.d1 = d1;
-}
+const TAB_IC = {};
 function showTab(t) {
+  if (!TABS[t]) t = 'att';
   tab = t; LS.set('tab', t);
-  for (const x of $('tabs').children) x.setAttribute('aria-pressed', x.dataset.t === t);
-  $('v-att').hidden = t !== 'att'; $('v-q').hidden = t !== 'q'; $('v-ch').hidden = t !== 'ch';
+  for (const box of ['tabs', 'dtabs']) for (const x of $(box).children) x.setAttribute('aria-pressed', x.dataset.t === t);
+  for (const k of Object.keys(TABS)) $('v-' + k).hidden = k !== t;
+  const b = $('tabs').querySelector(`[data-t="${t}"]`);
+  $('tab-title').innerHTML = b ? b.innerHTML : TABS[t];
+}
+function drawer(open) {
+  const d = $('drawer'), bd = $('backdrop');
+  if (open) { d.hidden = false; bd.hidden = false; requestAnimationFrame(() => d.classList.add('open')); }
+  else { d.classList.remove('open'); bd.hidden = true; setTimeout(() => { if (!d.classList.contains('open')) d.hidden = true; }, 260); }
+  $('menu').setAttribute('aria-expanded', open);
 }
 
 let bound = false;
@@ -552,32 +694,45 @@ function bind() {
   $('f-tch').addEventListener('change', onSel('tch', Number));
   $('f-lvl').addEventListener('change', onSel('lvl', Number));
   $('f-typ').addEventListener('change', onSel('typ', String));
+  // الفترة: يوم / أسبوع / شهر + الأسهم + من/إلى
+  $('units').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return;
+    const anchor = Math.min(NDAYS - 1, Math.max(FIRST, F.unit === 'custom' ? F.d1 : Math.min(F.d1, NDAYS - 1)));
+    setPeriod(b.dataset.u, anchor); render(); });
+  $('p-prev').addEventListener('click', () => { if (canShift(-1)) { shiftPeriod(-1); render(); } });
+  $('p-next').addEventListener('click', () => { if (canShift(1)) { shiftPeriod(1); render(); } });
   const onDate = which => e => { const d = fromIso(e.target.value); if (d == null) { syncSelects(); return; }
-    which ? setRange(Math.min(F.d0, d), d) : setRange(d, Math.max(F.d1, d)); render(); };
+    let a = which ? Math.min(F.d0, d) : d, z = which ? d : Math.max(F.d1, d);
+    F.unit = 'custom'; F.d0 = a; F.d1 = z; render(); };
   $('f-d0').addEventListener('change', onDate(0));
   $('f-d1').addEventListener('change', onDate(1));
-  $('periods').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; const p = PERIODS.find(x => x.k === b.dataset.p); setRange(p.d[0], p.d[1]); render(); });
-  $('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b || b.dataset.t === tab) return; showTab(b.dataset.t); render(); });
+  // التبويبات (الحاسوب + القائمة الجانبية في الهاتف)
+  const onTab = e => { const b = e.target.closest('button[data-t]'); if (!b) return; drawer(false); if (b.dataset.t === tab) return; showTab(b.dataset.t); render(); };
+  $('tabs').addEventListener('click', onTab);
+  $('dtabs').addEventListener('click', onTab);
+  $('menu').addEventListener('click', () => drawer($('drawer').hidden));
+  $('backdrop').addEventListener('click', () => drawer(false));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') drawer(false); });
   $('metric').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; metric = b.dataset.m;
     for (const x of $('metric').children) x.setAttribute('aria-pressed', x === b); render(); });
   $('active').addEventListener('click', e => {
     const b = e.target.closest('[data-x]'); if (!b) return; const x = b.dataset.x;
-    if (x === 'd' || x === 'all') setRange(FIRST, NDAYS - 1);
-    if (x === 'all') Object.assign(F, { cls: null, tch: null, lvl: null, typ: null, stu: null, subj: null, strat: null }); else if (x !== 'd') F[x] = null;
+    if (x === 'all') Object.assign(F, { cls: null, tch: null, lvl: null, typ: null, stu: null, subj: null, strat: null }); else F[x] = null;
     render();
   });
-  // الضغط على أي سطر في الجداول ← تصفية (والضغط مرة ثانية يلغيها)
-  const pick = e => {
-    const r = e.target.closest('tr[data-k]'); if (!r) return;
-    const k = r.dataset.k, v = +r.dataset.v;
-    F[k] = F[k] === v ? null : v; if (k !== 'stu') F.stu = null;
-    render();
-  };
-  for (const id of ['t-cls', 't-miss', 't-stu', 't-tch', 't-st', 't-sj']) {
-    $(id).addEventListener('click', pick);
-    $(id).addEventListener('keydown', e => { if (e.key === 'Enter') pick(e); });
-  }
-  $('stu-more').addEventListener('click', () => { stuAll = !stuAll; render(); });
+  // الجداول: الضغط على الرأس ← ترتيب (من الأعلى إلى الأدنى ثم العكس) · الضغط على سطر ← تصفية
+  document.addEventListener('click', e => {
+    const th = e.target.closest('th[data-sort]');
+    if (th) {
+      const id = th.closest('table').id, i = +th.dataset.sort, s = SORT[id];
+      SORT[id] = s && s.i === i ? { i, dir: -s.dir } : { i, dir: -1 };
+      render(); return;
+    }
+    const r = e.target.closest('table.tbl tbody tr[data-k]');
+    if (r) { const k = r.dataset.k, v = +r.dataset.v; F[k] = F[k] === v ? null : v; if (k !== 'stu') F.stu = null; render(); }
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches && e.target.matches('tr[data-k]')) e.target.click(); });
+  $('stu-more').addEventListener('click', () => { more['t-stu'] = !more['t-stu']; render(); });
+  $('rstu-more').addEventListener('click', () => { more['t-rstu'] = !more['t-rstu']; render(); });
   const rebuild = () => { if (!loaded) return; if (tl) buildCharts(); render(); };
   new MutationObserver(rebuild).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', rebuild); } catch (e) {}
@@ -586,13 +741,11 @@ function bind() {
 
 /* ───────── التشغيل ───────── */
 function start(raw) {
-  const wasAll = loaded && F.d0 === FIRST && F.d1 === NDAYS - 1;
-  const prevEnd = loaded ? NDAYS - 1 : null;
+  const prevUnit = loaded ? F.unit : null;
   load(raw);
   TKN = raw.lists.tk || [];
-  // الحفاظ على الفلاتر بعد التحديث ما دامت صالحة (الفترة الكاملة تمتد تلقائياً لليوم الجديد)
-  if (!loaded || wasAll) setRange(FIRST, NDAYS - 1);
-  else setRange(F.d0, F.d1 === prevEnd ? NDAYS - 1 : F.d1);
+  // عند الفتح: الشهر الجاري. بعد التحديث: نفس الفترة
+  if (!prevUnit) setPeriod('month', NDAYS - 1);
   if (F.cls != null && !classes[F.cls]) F.cls = null;
   if (F.tch != null && !teachers[F.tch]) F.tch = null;
   if (F.stu != null && !students[F.stu]) F.stu = null;
@@ -603,7 +756,7 @@ function start(raw) {
   show('app');
   $('school').textContent = raw.school || 'مدرسة نور السلام القرآنية';
   $('year').textContent = (raw.year ? raw.year + ' · ' : '') + 'اليوم ' + dLabel(NDAYS - 1);
-  if (!loaded) { const want = LS.get('tab'); showTab(want === 'q' || want === 'ch' ? want : 'att'); }
+  if (!loaded) showTab(LS.get('tab') || 'att');
   fillSelects();
   if (tl) buildCharts();
   loaded = true;
@@ -658,7 +811,7 @@ async function boot() {
   const cached = await idbGet('data');
   if (cached && cached.data) {
     ver = cached.ver; syncedAt = cached.at || 0;
-    try { start(cached.data); setSync('ok'); } catch (e) { ver = ''; }
+    try { start(cached.data); setSync('ok'); } catch (e) { ver = ''; console.error(e); }
   } else show('boot');
   refresh();
 }

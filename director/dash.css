@@ -206,3 +206,49 @@ table.tbl { width: 100%; border-collapse: collapse; font-family: var(--f-ui); fo
   .tabs { width: 100%; }
   .tabs button { padding: 6px 8px; font-size: .82rem; flex: 1 1 0; min-width: 0; }
 }
+
+/* ───────── الإصدار 5: تبويبات بأيقونات، تنقّل الفترة، الفرز، القائمة الجانبية ───────── */
+.tabs button { display: inline-flex; align-items: center; gap: 6px; }
+svg.ti { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.tab-title { display: none; align-items: center; gap: 8px; font-family: var(--f-ui); font-weight: 600; font-size: 1rem; color: var(--ink); }
+.tab-title svg.ti { width: 20px; height: 20px; color: var(--p); }
+
+.pnav { display: inline-flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 2px; }
+.pnav b { font-family: var(--f-ui); font-weight: 600; font-size: .88rem; padding-inline: 6px; min-width: 110px; text-align: center; white-space: nowrap; }
+.pbtn { width: 30px; height: 30px; border-radius: 50%; border: 0; background: var(--p-soft); color: var(--p); display: grid; place-items: center; padding: 0; }
+.pbtn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.pbtn:disabled { opacity: .35; cursor: default; }
+
+.tbl th.sortable { cursor: pointer; user-select: none; }
+.tbl th.sortable:hover { color: var(--ink); }
+.tbl th .arr { font-size: .7em; margin-inline-start: 3px; color: var(--p); }
+.tbl td.pc { white-space: nowrap; }
+.dchip.ok { background: var(--ok-soft); color: var(--ok); }
+.dchip.late { background: var(--warn-soft); color: var(--warn); }
+
+.menu { display: none; }
+.backdrop { position: fixed; inset: 0; background: rgba(4, 14, 30, .45); z-index: 40; }
+.drawer { position: fixed; top: 0; bottom: 0; right: 0; width: min(280px, 82vw); z-index: 41; background: var(--surface); color: var(--ink);
+  box-shadow: var(--shadow); padding: calc(16px + env(safe-area-inset-top, 0px)) 14px calc(16px + env(safe-area-inset-bottom, 0px));
+  display: grid; align-content: start; gap: 14px; transform: translateX(105%); transition: transform .25s ease; }
+.drawer.open { transform: none; }
+.drawer-h { display: flex; align-items: center; gap: 10px; font-family: var(--f-ui); font-size: 1.05rem; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.drawer-h .logo { width: 30px; height: 40px; --logo-ink: var(--ink); --logo-accent: #C2441C; }
+.drawer-list { display: grid; gap: 4px; }
+.drawer-list button { display: flex; align-items: center; gap: 12px; border: 0; background: none; border-radius: 12px; padding: 11px 12px; font-family: var(--f-ui); font-size: .95rem; color: var(--ink); text-align: start; }
+.drawer-list button svg.ti { width: 20px; height: 20px; color: var(--muted); }
+.drawer-list button[aria-pressed="true"] { background: var(--p-soft); color: var(--p); font-weight: 600; }
+.drawer-list button[aria-pressed="true"] svg.ti { color: var(--p); }
+
+@media (max-width: 760px) {
+  .menu { display: grid; }
+  .tabs { display: none !important; }
+  .tab-title { display: flex; }
+  .pnav { flex: 1 1 auto; justify-content: space-between; }
+  #units { flex: 1 1 100%; }
+  #units button { flex: 1 1 0; }
+  .dates { flex: 1 1 100%; }
+  .dates label { flex: 1 1 0; }
+  .dates input { flex: 1 1 auto; width: 100%; }
+}
+@media (min-width: 761px) { .drawer, .backdrop { display: none !important; } }
