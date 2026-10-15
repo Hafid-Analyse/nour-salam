@@ -240,7 +240,7 @@ svg.ti { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-wid
 .drawer-list button[aria-pressed="true"] { background: var(--p-soft); color: var(--p); font-weight: 600; }
 .drawer-list button[aria-pressed="true"] svg.ti { color: var(--p); }
 
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) {
   .menu { display: grid; }
   .tabs { display: none !important; }
   .tab-title { display: flex; }
@@ -251,4 +251,46 @@ svg.ti { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-wid
   .dates label { flex: 1 1 0; }
   .dates input { flex: 1 1 auto; width: 100%; }
 }
-@media (min-width: 761px) { .drawer, .backdrop { display: none !important; } }
+
+
+/* ───────── الإصدار 6: الهاتف — الفلاتر في لوحة تنزلق من الأسفل ───────── */
+.mbar, .sheet-only { display: none; }
+@media (max-width: 760px), (max-height: 500px) {
+  .mbar { display: grid; gap: 8px; position: sticky; top: env(safe-area-inset-top, 0px); z-index: 6; background: var(--glass);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 8px 10px; }
+  .mrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .mtab { display: inline-flex; align-items: center; gap: 8px; border: 0; background: none; padding: 4px 2px; font-family: var(--f-ui); font-weight: 600; font-size: 1rem; color: var(--ink); min-width: 0; }
+  .mtab svg.ti { width: 20px; height: 20px; color: var(--p); }
+  .mtab::after { content: ""; width: 7px; height: 7px; border-inline-end: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); margin-top: -4px; }
+  .mfilter { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 5px 12px; font-family: var(--f-ui); font-size: .85rem; color: var(--ink); }
+  .mfilter svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+  .badge { min-width: 18px; height: 18px; border-radius: 99px; background: var(--p); color: #fff; font-size: .7rem; display: grid; place-items: center; padding: 0 5px; }
+  .mnav { width: 100%; justify-content: space-between; }
+  .mnav b { flex: 1; }
+  .m-active { min-height: 0; }
+
+  /* كتلة الفلاتر تصبح لوحة سفلية */
+  .filters { position: fixed; top: auto; left: 0; right: 0; bottom: 0; z-index: 42; max-height: 88vh; overflow-y: auto;
+    border-radius: 22px 22px 0 0; border-bottom: 0; background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none;
+    padding: 12px 16px calc(14px + env(safe-area-inset-bottom, 0px)); transform: translateY(105%); transition: transform .25s ease; visibility: hidden; }
+  .filters.open { transform: none; visibility: visible; }
+  .filters .tab-title, .filters .tabs, .filters .pnav, .filters .speed { display: none !important; }
+  .filters .trow { display: none; }
+  .sheet-only { display: flex; }
+  .sheet-h { align-items: center; justify-content: space-between; font-family: var(--f-ui); font-size: 1.05rem; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .xbtn { width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--surface-2); color: var(--ink); font-size: 1.2rem; line-height: 1; }
+  .sheet-f { gap: 10px; padding-top: 6px; }
+  .sheet-f .go { flex: 2; }
+  .clear2 { flex: 1; border: 1px solid var(--line); background: none; color: var(--bad); border-radius: 12px; font-family: var(--f-ui); font-size: .9rem; }
+  .speed { display: none !important; }
+}
+@media (min-width: 761px) and (min-height: 501px) { .drawer, .backdrop, .mbar { display: none !important; } }
+/* الهاتف بالعرض: شريط علوي أصغر وصف واحد للتبويب والفترة */
+@media (max-height: 500px) {
+  .bar { padding-block: 8px 30px; }
+  .bar .school, .bar .sub, .bar .tag { display: none; }
+  .bar h1 { font-size: 1.1rem; }
+  .bar svg.logo { width: 26px; height: 34px; }
+  .mbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); align-items: center; }
+  .m-active { grid-column: 1 / -1; }
+}

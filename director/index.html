@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Changa:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="dash.css?v=5">
+  <link rel="stylesheet" href="dash.css?v=6">
   <script>
     /* تطبيق الوضع المحفوظ قبل الرسم لتجنب الوميض */
     (function () { try { var t = JSON.parse(localStorage.getItem('nsd.theme')); if (t) document.documentElement.dataset.theme = t; } catch (e) {} })();
@@ -72,8 +72,25 @@
 </nav>
 
 <main class="wrap">
-  <section class="filters" aria-label="الفلاتر">
-    <div class="frow">
+  <!-- الهاتف: شريط مختصر (التبويب + الفترة + زر الفلاتر) بدل كتلة الفلاتر -->
+  <div class="mbar" id="mbar">
+    <div class="mrow">
+      <button class="mtab" id="m-tab" type="button" aria-label="اختيار التبويب"></button>
+      <button class="mfilter" id="m-filter" type="button" aria-controls="filters" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>فلاتر<span class="badge" id="m-badge" hidden></span>
+      </button>
+    </div>
+    <div class="pnav mnav">
+      <button class="pbtn" id="m-prev" type="button" aria-label="الفترة السابقة"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+      <b id="m-label"></b>
+      <button class="pbtn" id="m-next" type="button" aria-label="الفترة التالية"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
+    </div>
+    <div class="active m-active" id="m-active" hidden></div>
+  </div>
+
+  <section class="filters" id="filters" aria-label="الفلاتر">
+    <div class="sheet-h sheet-only"><b>الفلاتر</b><button class="xbtn" id="s-close" type="button" aria-label="إغلاق">×</button></div>
+    <div class="frow trow">
       <div class="tabs" id="tabs" role="group" aria-label="التقرير">
         <button type="button" data-t="att" aria-pressed="true"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>الحضور</span></button><button type="button" data-t="rec" aria-pressed="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></svg><span>الاستظهار</span></button><button type="button" data-t="rep" aria-pressed="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></svg><span>جودة التقارير</span></button><button type="button" data-t="q" aria-pressed="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg><span>جودة التدريس</span></button><button type="button" data-t="ch" aria-pressed="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M8 17v-6"/><path d="M13 17V7"/><path d="M18 17v-4"/></svg><span>الرسوم</span></button>
       </div>
@@ -104,6 +121,10 @@
       </div>
     </div>
     <div class="active" id="active"></div>
+    <div class="sheet-f sheet-only">
+      <button class="clear2" id="s-clear" type="button">مسح الكل</button>
+      <button class="go" id="s-done" type="button">تم</button>
+    </div>
   </section>
 
   <!-- ① الحضور -->
@@ -249,6 +270,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/crossfilter2/1.5.4/crossfilter.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
   <script src="../config.js?v=13"></script>
-  <script src="dash.js?v=5"></script>
+  <script src="dash.js?v=6"></script>
 </body>
 </html>

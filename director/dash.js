@@ -653,8 +653,9 @@ function syncSelects() {
   $('f-cls').value = F.cls ?? ''; $('f-tch').value = F.tch ?? ''; $('f-lvl').value = F.lvl ?? ''; $('f-typ').value = F.typ ?? '';
   $('f-d0').value = iso(Math.max(FIRST, F.d0)); $('f-d1').value = iso(Math.min(NDAYS - 1, F.d1));
   for (const b of $('units').children) b.setAttribute('aria-pressed', b.dataset.u === F.unit);
-  $('p-label').textContent = periodLabel();
-  $('p-prev').disabled = !canShift(-1); $('p-next').disabled = !canShift(1);
+  $('p-label').textContent = $('m-label').textContent = periodLabel();
+  $('p-prev').disabled = $('m-prev').disabled = !canShift(-1);
+  $('p-next').disabled = $('m-next').disabled = !canShift(1);
 }
 function renderActive() {
   const ch = [];
@@ -665,9 +666,12 @@ function renderActive() {
   if (F.stu != null) ch.push(['stu', 'التلميذ', students[F.stu].name]);
   if (F.subj != null) ch.push(['subj', 'المادة', SJ[F.subj]]);
   if (F.strat != null) ch.push(['strat', 'الاستراتيجية', ST[F.strat]]);
-  $('active').innerHTML = ch.map(c => `<button type="button" class="fchip" data-x="${c[0]}" aria-label="إزالة ${c[1]}"><i>×</i>${c[1]}: <b>${esc(c[2])}</b></button>`).join('')
-    + (ch.length > 1 ? '<button type="button" class="clear" data-x="all">مسح الكل</button>' : '')
-    + '<span class="speed" id="speed"></span>';
+  const chips = ch.map(c => `<button type="button" class="fchip" data-x="${c[0]}" aria-label="إزالة ${c[1]}"><i>×</i>${c[1]}: <b>${esc(c[2])}</b></button>`).join('')
+    + (ch.length > 1 ? '<button type="button" class="clear" data-x="all">مسح الكل</button>' : '');
+  $('active').innerHTML = chips + '<span class="speed" id="speed"></span>';
+  // الهاتف: الفلاتر المفعّلة تظهر تحت الشريط المختصر + عددها على زر الفلاتر
+  $('m-active').innerHTML = chips; $('m-active').hidden = !ch.length;
+  $('m-badge').textContent = ch.length; $('m-badge').hidden = !ch.length;
   syncSelects();
 }
 const TAB_IC = {};
@@ -677,7 +681,13 @@ function showTab(t) {
   for (const box of ['tabs', 'dtabs']) for (const x of $(box).children) x.setAttribute('aria-pressed', x.dataset.t === t);
   for (const k of Object.keys(TABS)) $('v-' + k).hidden = k !== t;
   const b = $('tabs').querySelector(`[data-t="${t}"]`);
-  $('tab-title').innerHTML = b ? b.innerHTML : TABS[t];
+  $('tab-title').innerHTML = $('m-tab').innerHTML = b ? b.innerHTML : TABS[t];
+}
+function sheet(open) {
+  const f = $('filters');
+  f.classList.toggle('open', open);
+  $('backdrop').hidden = !open && !$('drawer').classList.contains('open');
+  $('m-filter').setAttribute('aria-expanded', open);
 }
 function drawer(open) {
   const d = $('drawer'), bd = $('backdrop');
@@ -710,15 +720,25 @@ function bind() {
   $('tabs').addEventListener('click', onTab);
   $('dtabs').addEventListener('click', onTab);
   $('menu').addEventListener('click', () => drawer($('drawer').hidden));
-  $('backdrop').addEventListener('click', () => drawer(false));
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') drawer(false); });
+  $('backdrop').addEventListener('click', () => { drawer(false); sheet(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { drawer(false); sheet(false); } });
+  // الهاتف: الشريط المختصر + لوحة الفلاتر
+  $('m-tab').addEventListener('click', () => drawer(true));
+  $('m-prev').addEventListener('click', () => { if (canShift(-1)) { shiftPeriod(-1); render(); } });
+  $('m-next').addEventListener('click', () => { if (canShift(1)) { shiftPeriod(1); render(); } });
+  $('m-filter').addEventListener('click', () => sheet(true));
+  $('s-close').addEventListener('click', () => sheet(false));
+  $('s-done').addEventListener('click', () => sheet(false));
+  $('s-clear').addEventListener('click', () => { Object.assign(F, { cls: null, tch: null, lvl: null, typ: null, stu: null, subj: null, strat: null }); setPeriod('month', NDAYS - 1); render(); });
   $('metric').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; metric = b.dataset.m;
     for (const x of $('metric').children) x.setAttribute('aria-pressed', x === b); render(); });
-  $('active').addEventListener('click', e => {
+  const onChip = e => {
     const b = e.target.closest('[data-x]'); if (!b) return; const x = b.dataset.x;
     if (x === 'all') Object.assign(F, { cls: null, tch: null, lvl: null, typ: null, stu: null, subj: null, strat: null }); else F[x] = null;
     render();
-  });
+  };
+  $('active').addEventListener('click', onChip);
+  $('m-active').addEventListener('click', onChip);
   // الجداول: الضغط على الرأس ← ترتيب (من الأعلى إلى الأدنى ثم العكس) · الضغط على سطر ← تصفية
   document.addEventListener('click', e => {
     const th = e.target.closest('th[data-sort]');
