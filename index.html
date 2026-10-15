@@ -6,21 +6,21 @@
   <meta name="theme-color" content="#0F3D8C">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <title>سجل المعلم — مدرسة نور السلام القرآنية</title>
+  <title>لوحة المدير — مدرسة نور السلام القرآنية</title>
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
   <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="manifest" href="manifest.webmanifest">
-  <meta name="apple-mobile-web-app-title" content="السجل اليومي">
+  <meta name="apple-mobile-web-app-title" content="لوحة المدير">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="application-name" content="السجل اليومي">
+  <meta name="application-name" content="لوحة المدير">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Changa:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=13">
+  <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Changa:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="dash.css?v=6">
   <script>
     /* تطبيق الوضع المحفوظ قبل الرسم لتجنب الوميض */
-    (function () { try { var t = JSON.parse(localStorage.getItem('ns.theme')); if (t) document.documentElement.dataset.theme = t; } catch (e) {} })();
+    (function () { try { var t = JSON.parse(localStorage.getItem('nsd.theme')); if (t) document.documentElement.dataset.theme = t; } catch (e) {} })();
   </script>
 </head>
 <body>
@@ -33,10 +33,243 @@
     </defs>
   </svg>
 
-  <div id="app"></div>
-  <div id="toast" role="status" aria-live="polite"></div>
+  <!-- ① أول تنزيل للبيانات -->
+  <section class="boot" id="boot" hidden>
+    <div class="spinner" aria-hidden="true"></div>
+    <p id="boot-msg">جارٍ تنزيل بيانات الموسم…</p>
+    <button class="go" id="boot-retry" type="button" hidden>إعادة المحاولة</button>
+  </section>
 
-  <script src="config.js?v=13"></script>
-  <script src="app.js?v=13" defer></script>
+  <!-- ② اللوحة -->
+  <div id="app" hidden>
+<header class="bar">
+  <div class="bar-in">
+    <button class="ibtn menu" id="menu" type="button" aria-label="القائمة" aria-expanded="false" aria-controls="drawer"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    <svg class="logo" aria-hidden="true"><use href="#logo-mark"/></svg>
+    <div>
+      <h1>لوحة المدير</h1>
+      <div class="school" id="school">مدرسة نور السلام القرآنية</div>
+      <div class="sub"><span class="sync" id="sync" aria-live="polite"></span></div>
+    </div>
+    <div class="bar-actions">
+      <span class="tag" id="year"></span>
+      <button class="ibtn" id="refresh" type="button" aria-label="تحديث البيانات" title="تحديث البيانات"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+      <button class="ibtn" id="theme" type="button" aria-label="تبديل الوضع الليلي" title="الوضع الليلي"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></button>
+    </div>
+  </div>
+</header>
+
+<div class="backdrop" id="backdrop" hidden></div>
+<nav class="drawer" id="drawer" aria-label="التبويبات" hidden>
+  <div class="drawer-h"><svg class="logo" aria-hidden="true"><use href="#logo-mark"/></svg><b>لوحة المدير</b></div>
+  <div class="drawer-list" id="dtabs">
+    <button type="button" data-t="att" aria-pressed="true"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>الحضور</span></button>
+    <button type="button" data-t="rec" aria-pressed="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></svg><span>الاستظهار</span></button>
+    <button type="button" data-t="rep" aria-pressed="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></svg><span>جودة التقارير</span></button>
+    <button type="button" data-t="q" aria-pressed="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg><span>جودة التدريس</span></button>
+    <button type="button" data-t="ch" aria-pressed="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M8 17v-6"/><path d="M13 17V7"/><path d="M18 17v-4"/></svg><span>الرسوم</span></button>
+  </div>
+</nav>
+
+<main class="wrap">
+  <!-- الهاتف: شريط مختصر (التبويب + الفترة + زر الفلاتر) بدل كتلة الفلاتر -->
+  <div class="mbar" id="mbar">
+    <div class="mrow">
+      <button class="mtab" id="m-tab" type="button" aria-label="اختيار التبويب"></button>
+      <button class="mfilter" id="m-filter" type="button" aria-controls="filters" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>فلاتر<span class="badge" id="m-badge" hidden></span>
+      </button>
+    </div>
+    <div class="pnav mnav">
+      <button class="pbtn" id="m-prev" type="button" aria-label="الفترة السابقة"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+      <b id="m-label"></b>
+      <button class="pbtn" id="m-next" type="button" aria-label="الفترة التالية"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
+    </div>
+    <div class="active m-active" id="m-active" hidden></div>
+  </div>
+
+  <section class="filters" id="filters" aria-label="الفلاتر">
+    <div class="sheet-h sheet-only"><b>الفلاتر</b><button class="xbtn" id="s-close" type="button" aria-label="إغلاق">×</button></div>
+    <div class="frow trow">
+      <div class="tabs" id="tabs" role="group" aria-label="التقرير">
+        <button type="button" data-t="att" aria-pressed="true"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>الحضور</span></button><button type="button" data-t="rec" aria-pressed="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></svg><span>الاستظهار</span></button><button type="button" data-t="rep" aria-pressed="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></svg><span>جودة التقارير</span></button><button type="button" data-t="q" aria-pressed="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg><span>جودة التدريس</span></button><button type="button" data-t="ch" aria-pressed="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M8 17v-6"/><path d="M13 17V7"/><path d="M18 17v-4"/></svg><span>الرسوم</span></button>
+      </div>
+      <div class="tab-title" id="tab-title"></div>
+    </div>
+    <div class="frow">
+      <div class="seg" id="units" role="group" aria-label="مدة الفترة">
+        <button type="button" data-u="day" aria-pressed="false">اليوم</button>
+        <button type="button" data-u="week" aria-pressed="false">الأسبوع</button>
+        <button type="button" data-u="month" aria-pressed="true">الشهر</button>
+      </div>
+      <div class="pnav">
+        <button class="pbtn" id="p-prev" type="button" aria-label="الفترة السابقة" title="السابق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+        <b id="p-label"></b>
+        <button class="pbtn" id="p-next" type="button" aria-label="الفترة التالية" title="التالي"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
+      </div>
+      <div class="dates">
+        <label><span>من</span><input type="date" id="f-d0"></label>
+        <label><span>إلى</span><input type="date" id="f-d1"></label>
+      </div>
+    </div>
+    <div class="frow">
+      <div class="sel">
+        <label><span>القسم</span><select id="f-cls"></select></label>
+        <label><span>المعلم</span><select id="f-tch"></select></label>
+        <label><span>المستوى</span><select id="f-lvl"></select></label>
+        <label><span>نوع القسم</span><select id="f-typ"></select></label>
+      </div>
+    </div>
+    <div class="active" id="active"></div>
+    <div class="sheet-f sheet-only">
+      <button class="clear2" id="s-clear" type="button">مسح الكل</button>
+      <button class="go" id="s-done" type="button">تم</button>
+    </div>
+  </section>
+
+  <!-- ① الحضور -->
+  <div class="view" id="v-att">
+    <section class="kpis" id="kpis"></section>
+    <section class="card">
+      <div class="c-h"><h2>الأقسام</h2><p>أرقام الحضور لكل قسم في الفترة المختارة. اضغط على قسم لعرض كل تلاميذه.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-cls"></table></div>
+    </section>
+    <section class="card" id="c-att-stu" hidden>
+      <div class="c-h"><h2 id="h-att-stu"></h2><p>كل تلاميذ القسم المسجّلين، مع أيام حضورهم وغيابهم في الفترة المختارة.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-att-stu"></table></div>
+    </section>
+    <section class="card">
+      <div class="c-h"><h2>تلاميذ للمتابعة</h2><p>كل تلميذ غاب يوماً أو أكثر، من الأكثر غياباً إلى الأقل. اضغط على تلميذ لعرض أرقامه وحده.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-stu"></table></div>
+      <button class="more" id="stu-more" type="button" hidden></button>
+    </section>
+  </div>
+
+  <!-- ② الاستظهار -->
+  <div class="view" id="v-rec" hidden>
+    <section class="kpis" id="kpis-rec"></section>
+    <section class="card">
+      <div class="c-h"><h2>الأقسام</h2><p>أرقام الاستظهار لكل قسم (من الحاضرين فقط). اضغط على قسم لعرض كل تلاميذه.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-rcls"></table></div>
+    </section>
+    <section class="card" id="c-rec-stu" hidden>
+      <div class="c-h"><h2 id="h-rec-stu"></h2><p>كل تلاميذ القسم المسجّلين، مع عدد مرات الاستظهار في الفترة المختارة.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-rec-stu"></table></div>
+    </section>
+    <section class="card">
+      <div class="c-h"><h2>تلاميذ للمتابعة</h2><p>كل تلميذ حضر ولم يستظهر مرة أو أكثر، من الأكثر إلى الأقل.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-rstu"></table></div>
+      <button class="more" id="rstu-more" type="button" hidden></button>
+    </section>
+  </div>
+
+  <!-- ③ جودة التقارير -->
+  <div class="view" id="v-rep" hidden>
+    <section class="kpis" id="kpis-rep"></section>
+    <section class="card">
+      <div class="c-h"><h2>المعلمون</h2><p>التقارير المطلوبة تخص معلمي الأقسام (أيام البرنامج الأسبوعي دون العطل). في وقتها = في يوم الحصة أو اليوم الموالي. درجة الجودة: في وقتها 100 · متأخر يومين 70 · ثلاثة أيام فأكثر 40 · لم يُرسل 0.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-rep"></table></div>
+    </section>
+    <section class="card">
+      <div class="c-h"><h2>التواريخ</h2>
+        <div class="legend"><span><i class="box" style="background:var(--ok)"></i>في وقته</span><span><i class="box" style="background:var(--warn)"></i>متأخر يومين فأكثر</span><span><i class="box" style="background:var(--bad)"></i>لم يُرسل</span></div>
+        <p>كل أيام التقارير لكل معلم في الفترة المختارة.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-repd"></table></div>
+    </section>
+  </div>
+
+  <!-- ④ جودة التدريس -->
+  <div class="view" id="v-q" hidden>
+    <section class="kpis" id="kpis2"></section>
+    <section class="card">
+      <div class="c-h"><h2>المعلمون</h2><p>عدد الدروس المسجلة لكل معلم وما استُعمل فيها. اضغط على معلم لتصفية اللوحة به.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-tch"></table></div>
+    </section>
+    <div class="grid2 even">
+    <section class="card">
+      <div class="c-h"><h2>الاستراتيجيات</h2><p>عدد الدروس التي استُعملت فيها كل استراتيجية. اضغط لتصفية الدروس بها.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-st"></table></div>
+    </section>
+    <section class="card">
+      <div class="c-h"><h2>مواد المنهاج</h2><p>عدد الدروس في كل مادة. اضغط لتصفية الدروس بها.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-sj"></table></div>
+    </section>
+    </div>
+    <div class="grid2 even">
+    <section class="card">
+      <div class="c-h"><h2>الوسائل التعليمية</h2><p>عدد الدروس التي استُعملت فيها كل وسيلة.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-to"></table></div>
+    </section>
+    <section class="card">
+      <div class="c-h"><h2>المهام المنجزة</h2><p>عدد الدروس التي أُنجزت فيها كل مهمة.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-tk"></table></div>
+    </section>
+    </div>
+    <div class="grid2 even">
+    <section class="card">
+      <div class="c-h"><h2>حصص القرآن</h2><p>في أقسام التلقين، حسب نوع الحصة.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-qr"></table></div>
+    </section>
+    <section class="card">
+      <div class="c-h"><h2>أيام لم تُقدَّم فيها حصة</h2><p>كما سجّلها المعلمون، مع التواريخ.</p></div>
+      <div class="tbl-wrap"><table class="tbl" id="t-off"></table></div>
+    </section>
+    </div>
+  </div>
+  <!-- ⑤ الرسوم (لوقت لاحق) -->
+  <div class="view" id="v-ch" hidden>
+    <section class="card">
+      <div class="c-h">
+        <h2>الحضور والاستظهار أسبوعاً بأسبوع</h2>
+        <div class="legend">
+          <span><i style="background:var(--p)"></i>الحضور</span>
+          <span><i style="background:var(--p-3)"></i>الاستظهار</span>
+          <span><i class="box" style="background:var(--hol);border:1px solid var(--line)"></i>عطلة</span>
+        </div>
+        <p>اسحب طرفي الشريط أسفل الرسم لاختيار فترة.</p>
+      </div>
+      <div id="tl" role="img" aria-label="رسم الحضور والاستظهار الأسبوعي"></div>
+    </section>
+    <section class="card">
+      <div class="c-h">
+        <h2>الأقسام</h2>
+        <div class="seg" id="metric" role="group" aria-label="المؤشر">
+          <button type="button" data-m="att" aria-pressed="true">الحضور</button>
+          <button type="button" data-m="rec" aria-pressed="false">الاستظهار</button>
+        </div>
+        <p>اضغط على قسم لتصفية اللوحة به.</p>
+      </div>
+      <div id="cls" role="img" aria-label="ترتيب الأقسام"></div>
+    </section>
+    <div class="grid2 even">
+      <section class="card">
+        <div class="c-h"><h2>الاستراتيجيات</h2><p>نسبة الدروس التي استُعملت فيها كل استراتيجية.</p></div>
+        <div id="q-st" role="img" aria-label="الاستراتيجيات"></div>
+      </section>
+      <section class="card">
+        <div class="c-h"><h2>مواد المنهاج</h2><p>عدد الدروس في كل مادة.</p></div>
+        <div id="q-sj" role="img" aria-label="المواد"></div>
+      </section>
+    </div>
+    <div class="grid2 even">
+      <section class="card">
+        <div class="c-h"><h2>حصص القرآن</h2><p>التوازن بين أنواع الحصص.</p></div>
+        <div id="q-qr" class="pie" role="img" aria-label="أنواع حصص القرآن"></div>
+      </section>
+      <section class="card">
+        <div class="c-h"><h2>أيام لم تُقدَّم فيها حصة</h2><p>حسب السبب.</p></div>
+        <div id="q-off" class="pie" role="img" aria-label="أسباب عدم التدريس"></div>
+      </section>
+    </div>
+  </div>
+  <p class="foot" id="foot"></p>
+</main>
+
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crossfilter2/1.5.4/crossfilter.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
+  <script src="../config.js?v=13"></script>
+  <script src="dash.js?v=6"></script>
 </body>
 </html>
