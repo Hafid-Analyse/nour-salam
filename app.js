@@ -598,7 +598,7 @@
     const st = students(), r = S.draft.rec, a = S.draft.att, absent = absentLabel();
     return `
       <div id="stats" style="--i:2">${recStats()}</div>
-      <div class="toolbar" style="--i:3"><h3>من استظهر؟</h3><button class="btn btn-soft btn-sm" data-act="rec-all">${ic('check')} الكل ${esc(grades()[0])}</button></div>
+      <div class="toolbar" style="--i:3"><h3>من استظهر؟</h3></div>
       <div class="list">${st.map((s, n) => {
         const abs = a[s.id] === absent;
         return `
