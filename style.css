@@ -520,3 +520,12 @@ textarea.inp { min-height: 110px; resize: vertical; }
 .pend-note { display: flex; align-items: center; gap: 8px; justify-content: center; margin-top: 12px; color: var(--warn); font-family: var(--f-ui); font-size: .82rem; font-weight: 600; text-align: center; }
 .pend-note .ic { width: 16px; height: 16px; }
 .newbtn[disabled], .home-acts .btn[disabled] { filter: grayscale(.85) opacity(.55); }
+
+/* نوعية الحفظ: أزرار نصية صغيرة بجانب زر "لم يستظهر" */
+.opts.grades { gap: 4px; }
+.opts.grades .gbtn { width: auto; min-width: 40px; padding: 0 8px; border-radius: 99px; font-family: var(--f-ui); font-size: .78rem; font-weight: 600; }
+@media (max-width: 380px) {
+  .opts.grades .gbtn { min-width: 34px; padding: 0 6px; font-size: .72rem; }
+  .srow:has(.grades) .av { display: none; }
+  .srow:has(.grades) { grid-template-columns: 1fr auto; }
+}

@@ -541,7 +541,7 @@
       const list = cfg().lists.attendance, c = attCounts(r.att);
       const names = list.slice(1).map(st => { const n = namesBy(r.att, v => v === st); return n.length ? `<li><b>${esc(st)}</b><span>${esc(n.join('، '))}</span></li>` : ''; }).join('');
       out += sec('الحضور', `<div class="tally">${list.map((s, i) => `<span style="--tone:${TONES[i] || 'var(--p)'}"><i></i>${esc(s)} <b>${c.by[s] || 0}</b></span>`).join('')}</div>${names ? `<ul class="sum">${names}</ul>` : ''}`);
-      const y = namesBy(r.rec, v => v === true).length, nList = namesBy(r.rec, v => v === false);
+      const y = namesBy(r.rec, v => v != null && v !== false).length, nList = namesBy(r.rec, v => v === false);
       out += sec('الاستظهار', `<div class="tally"><span style="--tone:var(--ok)"><i></i>استظهر <b>${y}</b></span><span style="--tone:var(--bad)"><i></i>لم يستظهر <b>${nList.length}</b></span></div>
         ${nList.length ? `<ul class="sum"><li><b>لم يستظهر</b><span>${esc(nList.join('، '))}</span></li></ul>` : ''}`);
     }
@@ -563,14 +563,21 @@
       <div class="tally">${items.map(it => `<span style="--tone:${it.tone}"><i></i>${esc(it.label)} <b>${it.n}</b></span>`).join('')}</div></div></div>`;
   }
   const recPresent = () => students().filter(s => S.draft.att[s.id] !== absentLabel());
+  // نوعية الحفظ (من صفحة القوائم): قيمة الاستظهار = false (لم يستظهر) أو اسم التقدير
+  const grades = () => { const g = (cfg().lists || {}).grades; return g && g.length ? g : ['ممتاز', 'جيد', 'حسن']; };
+  const GRADE_TONES = ['var(--ok)', 'var(--p)', 'var(--warn)', 'var(--p-3)', 'var(--muted)'];
+  const isGrade = v => typeof v === 'string' && grades().indexOf(v) > -1;
+  const recDone = v => v === false || isGrade(v);
   function attStats() {
     const c = attCounts(S.draft.att), list = cfg().lists.attendance;
     return miniCard('تسجيل الحضور', c.marked, c.total, list.slice(0, 3).map((s, i) => ({ label: s, n: c.by[s] || 0, tone: TONES[i] })));
   }
   function recStats() {
-    const r = S.draft.rec, pres = recPresent(); let y = 0, n = 0;
-    pres.forEach(s => { if (r[s.id] === true) y++; else if (r[s.id] === false) n++; });
-    return miniCard('الاستظهار', y + n, pres.length, [{ label: 'استظهر', n: y, tone: 'var(--ok)' }, { label: 'لم يستظهر', n, tone: 'var(--bad)' }, { label: 'لم يُحدَّد', n: pres.length - y - n, tone: 'var(--muted)' }]);
+    const r = S.draft.rec, pres = recPresent(), g = grades(), by = g.map(() => 0); let n = 0;
+    pres.forEach(s => { const v = r[s.id]; if (v === false) n++; else { const i = g.indexOf(v); if (i > -1) by[i]++; } });
+    const done = n + by.reduce((a, b) => a + b, 0);
+    return miniCard('الاستظهار', done, pres.length, g.map((x, i) => ({ label: x, n: by[i], tone: GRADE_TONES[i] || 'var(--p)' }))
+      .concat([{ label: 'لم يستظهر', n, tone: 'var(--bad)' }, { label: 'لم يُحدَّد', n: pres.length - done, tone: 'var(--muted)' }]));
   }
   function refreshStats() { const b = $('#stats'); if (b) b.innerHTML = (stepNow() === 'att' ? attStats() : recStats()); }
   const stepNow = () => steps()[Math.min(S.draft.step || 0, steps().length - 1)];
@@ -591,15 +598,15 @@
     const st = students(), r = S.draft.rec, a = S.draft.att, absent = absentLabel();
     return `
       <div id="stats" style="--i:2">${recStats()}</div>
-      <div class="toolbar" style="--i:3"><h3>من استظهر؟</h3><button class="btn btn-soft btn-sm" data-act="rec-all">${ic('check')} الكل استظهر</button></div>
+      <div class="toolbar" style="--i:3"><h3>من استظهر؟</h3><button class="btn btn-soft btn-sm" data-act="rec-all">${ic('check')} الكل ${esc(grades()[0])}</button></div>
       <div class="list">${st.map((s, n) => {
         const abs = a[s.id] === absent;
         return `
         <div class="srow ${abs ? 'dim' : ''}" style="--i:${Math.min(n + 4, 14)}">
           <span class="av">${esc(initial(s.name))}</span><span class="sname">${esc(s.name)}${abs ? ` <span class="tag">${esc(absent)}</span>` : ''}</span>
-          <div class="opts" data-id="${esc(s.id)}">
-            <button data-act="rec" data-v="1" class="${r[s.id] === true ? 'on' : ''}" style="--tone:var(--ok)" ${abs ? 'disabled' : ''} aria-label="استظهر">${ic('check')}</button>
-            <button data-act="rec" data-v="0" class="${r[s.id] === false ? 'on' : ''}" style="--tone:var(--bad)" ${abs ? 'disabled' : ''} aria-label="لم يستظهر">${ic('x')}</button>
+          <div class="opts grades" data-id="${esc(s.id)}">
+            ${grades().map((g, i) => `<button data-act="rec" data-v="${esc(g)}" class="gbtn ${r[s.id] === g ? 'on' : ''}" style="--tone:${GRADE_TONES[i] || 'var(--p)'}" ${abs ? 'disabled' : ''} aria-label="${esc(g)}">${esc(g)}</button>`).join('')}
+            <button data-act="rec" data-v="0" class="${r[s.id] === false ? 'on' : ''}" style="--tone:var(--bad)" ${abs ? 'disabled' : ''} aria-label="لم يستظهر" title="لم يستظهر">${ic('x')}</button>
           </div>
         </div>`; }).join('')}</div>`;
   }
@@ -697,8 +704,8 @@
     }
     if (step === 'rec') {
       students().forEach(s => { if (d.att[s.id] === absentLabel()) delete d.rec[s.id]; });
-      const left = recPresent().filter(s => typeof d.rec[s.id] !== 'boolean').length;
-      if (left) { toast(`حدّد الاستظهار لكل الحاضرين (بقي ${left})`, 'warn'); return false; }
+      const left = recPresent().filter(s => !recDone(d.rec[s.id])).length;
+      if (left) { toast(`حدّد نوعية الحفظ أو «لم يستظهر» لكل الحاضرين (بقي ${left})`, 'warn'); return false; }
     }
     if (step === 'quran' && S.cls.type !== T.MUNAFASA && !d.log.quran.type) { toast('اختر نوع حصة القرآن', 'warn'); return false; }
     if (step === 'lessons') {
@@ -734,7 +741,7 @@
       payload = {
         log: { quran: isMain() ? q : null, lessons: d.log.lessons.filter(l => l.subject || l.lesson), notes: d.log.notes },
         att: isMain() ? students().map(s => ({ id: s.id, status: d.att[s.id] })) : [],
-        rec: isMain() ? recPresent().map(s => ({ id: s.id, done: d.rec[s.id] })) : []
+        rec: isMain() ? recPresent().map(s => ({ id: s.id, done: d.rec[s.id] !== false, grade: d.rec[s.id] === false ? '' : d.rec[s.id] })) : []
       };
     }
     // ⚡ إرسال في الخلفية: يُحفظ التقرير في "صندوق الإرسال" ويعود المعلم فوراً لصفحة البداية
@@ -761,7 +768,7 @@
     ix.last = job.date;
     const p = job.payload;
     S.recs[job.cls + '|' + job.date] = job.off ? { att: {}, rec: {}, log: logFrom({ off: Object.assign({ on: true }, p.noSession) }) }
-      : { att: (p.att || []).reduce((o, x) => (o[x.id] = x.status, o), {}), rec: (p.rec || []).reduce((o, x) => (o[x.id] = x.done, o), {}), log: logFrom(clone(p.log)) };
+      : { att: (p.att || []).reduce((o, x) => (o[x.id] = x.status, o), {}), rec: (p.rec || []).reduce((o, x) => (o[x.id] = x.done ? (x.grade || true) : false, o), {}), log: logFrom(clone(p.log)) };
     LS.set('session', S.session);
   }
   const sending = {};
@@ -888,14 +895,14 @@
         markDirty(); return renderJourney(false);
       }
       case 'rec': {
-        const id = b.parentElement.dataset.id, v = b.dataset.v === '1';
+        const id = b.parentElement.dataset.id, v = b.dataset.v === '0' ? false : b.dataset.v;
         if (d.rec[id] === v) delete d.rec[id]; else d.rec[id] = v;
-        $$('button', b.parentElement).forEach(x => x.classList.toggle('on', d.rec[id] === (x.dataset.v === '1')));
+        $$('button', b.parentElement).forEach(x => x.classList.toggle('on', d.rec[id] === (x.dataset.v === '0' ? false : x.dataset.v)));
         b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop');
         markDirty(); return refreshStats();
       }
       case 'rec-all': {
-        recPresent().forEach(s => { if (typeof d.rec[s.id] !== 'boolean') d.rec[s.id] = true; });
+        recPresent().forEach(s => { if (!recDone(d.rec[s.id])) d.rec[s.id] = grades()[0]; });
         markDirty(); return renderJourney(false);
       }
       case 'chip': {
