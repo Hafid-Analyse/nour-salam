@@ -524,8 +524,10 @@ textarea.inp { min-height: 110px; resize: vertical; }
 /* نوعية الحفظ: أزرار نصية صغيرة بجانب زر "لم يستظهر" */
 .opts.grades { gap: 4px; }
 .opts.grades .gbtn { width: auto; min-width: 40px; padding: 0 8px; border-radius: 99px; font-family: var(--f-ui); font-size: .78rem; font-weight: 600; }
-@media (max-width: 380px) {
-  .opts.grades .gbtn { min-width: 34px; padding: 0 6px; font-size: .72rem; }
-  .srow:has(.grades) .av { display: none; }
-  .srow:has(.grades) { grid-template-columns: 1fr auto; }
-}
+/* الاستظهار: الاسم كاملاً في سطر، والأزرار تحته على كامل العرض (يناسب أي عدد من التقديرات) */
+.srow.srow-rec { grid-template-columns: auto 1fr; row-gap: 8px; }
+.srow-rec .sname { white-space: normal; }
+.srow-rec .opts.grades { grid-column: 1 / -1; flex-wrap: wrap; gap: 6px; }
+.srow-rec .opts.grades .gbtn { flex: 1 1 auto; min-width: 0; height: 34px; padding: 0 4px; white-space: nowrap; }
+@media (max-width: 380px) { .srow-rec .opts.grades { gap: 4px; } .srow-rec .opts.grades .gbtn { font-size: .72rem; padding: 0 2px; } }
+.srow-rec .opts.grades button:not(.gbtn) { flex: 0 0 34px; width: 34px; height: 34px; }

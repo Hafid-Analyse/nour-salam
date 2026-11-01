@@ -602,7 +602,7 @@
       <div class="list">${st.map((s, n) => {
         const abs = a[s.id] === absent;
         return `
-        <div class="srow ${abs ? 'dim' : ''}" style="--i:${Math.min(n + 4, 14)}">
+        <div class="srow srow-rec ${abs ? 'dim' : ''}" style="--i:${Math.min(n + 4, 14)}">
           <span class="av">${esc(initial(s.name))}</span><span class="sname">${esc(s.name)}${abs ? ` <span class="tag">${esc(absent)}</span>` : ''}</span>
           <div class="opts grades" data-id="${esc(s.id)}">
             ${grades().map((g, i) => `<button data-act="rec" data-v="${esc(g)}" class="gbtn ${r[s.id] === g ? 'on' : ''}" style="--tone:${GRADE_TONES[i] || 'var(--p)'}" ${abs ? 'disabled' : ''} aria-label="${esc(g)}">${esc(g)}</button>`).join('')}
