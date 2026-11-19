@@ -50,6 +50,7 @@
   const absentLabel = () => cfg().lists.attendance[1];
 
   const IC = {
+    chart: '<path d="M3 3v18h18"/><path d="M7 15v2M11 11v6M15 7v10M19 12v5"/>',
     users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
     mic: '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/>',
     note: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
@@ -228,6 +229,7 @@
   function afterIndexChange() {
     if (!S.cls) return;
     if (S.view === 'home') return renderHome(false);
+    if (S.view === 'reports') { rcLoad(); return renderReports(false); }
     const box = $('#calBox'); if (box) box.innerHTML = calHTML();
   }
 
@@ -427,6 +429,7 @@
         </div>`;
     }
     html += `<button class="btn btn-primary newbtn" data-act="new" style="--i:3" ${pend ? 'disabled' : ''}>${ic('plus')} تقرير جديد</button>`;
+    html += `<button class="btn btn-ghost repbtn" data-act="reports" style="--i:4">${ic('chart')} تقاريري</button>`;
     if (pend && !navigator.onLine) html += `<p class="pend-note">${ic('info')} التقرير محفوظ على الجهاز وسيُرسَل تلقائياً عند عودة الاتصال</p>`;
     p.innerHTML = html;
     renderNav();
@@ -746,6 +749,7 @@
     }
     // ⚡ إرسال في الخلفية: يُحفظ التقرير في "صندوق الإرسال" ويعود المعلم فوراً لصفحة البداية
     const job = { cls: S.cls.id, date: d.date, payload, editing, off: !!off, draft: Object.assign(clone(d), { editing, dirty: true }) };
+    const share = !off && !editing && isMain() && students().length ? shareData(d) : null;   // صورة الأولياء: بعد الإرسال الأول فقط
     LS.set('outbox.' + job.cls, job);
     applyLocal(job);
     dropDraft();
@@ -753,6 +757,7 @@
     renderHome(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
     flushOutbox(job.cls);
+    if (share) openShare(share);
   }
 
   /* ───────── صندوق الإرسال (تقرير واحد معلَّق لكل قسم) ───────── */
@@ -823,10 +828,341 @@
     if (!silent && !confirm(unsent ? 'يوجد تقرير لم يُرسَل بعد وسيضيع. تسجيل الخروج رغم ذلك؟' : 'تسجيل الخروج من هذا الجهاز؟')) return;
     LS.keys('draft.').forEach(k => LS.del(k));
     LS.keys('outbox.').forEach(k => LS.del(k));
+    LS.keys('rc.').forEach(k => LS.del(k));
     LS.del('session'); LS.del('ui');
     Object.assign(S, { session: null, cls: null, draft: null, editing: false, recs: {}, view: 'home' });
     renderLogin();
     if (msg) toast(msg, 'warn');
+  }
+
+  /* ═════════════ تقاريري: تقارير المعلم الخاصة (من الفهرس + تقارير الأيام المحفوظة في الجهاز) ═════════════ */
+  // الرزنامة والحصص فورية من الفهرس · التفاصيل من تقارير الأيام: تُنزَّل مرة واحدة وتُحفظ (المقفلة لا تتغير)
+  const R = { tab: 'sum', ym: null, busy: false, done: 0, total: 0, err: '', run: 0 };
+  const RTABS = () => (isMain() ? [['sum', 'تقاريري'], ['att', 'الحضور'], ['rec', 'الاستظهار'], ['teach', 'تدريسي']] : [['sum', 'تقاريري'], ['teach', 'تدريسي']]);
+  const rcKey = () => 'rc.' + S.cls.id;
+  function rcLoad() {
+    const all = LS.get(rcKey(), {}), last = index().last;
+    Object.keys(all).forEach(d => { const k = S.cls.id + '|' + d; if (d !== last && !S.recs[k]) S.recs[k] = all[d]; });
+  }
+  function rcPersist(dates) {
+    const all = LS.get(rcKey(), {}), last = index().last; let ch = false;
+    dates.forEach(d => { const r = recOf(d); if (r && d !== last && !all[d]) { all[d] = r; ch = true; } });
+    if (ch) LS.set(rcKey(), all);
+  }
+  const monthDays = (y, m) => { const n = new Date(y, m + 1, 0).getDate(), out = []; for (let d = 1; d <= n; d++) out.push(y + '-' + pad(m + 1) + '-' + pad(d)); return out; };
+  function rMonth() {
+    if (!R.ym) { const t = parse(today()); R.ym = [t.getFullYear(), t.getMonth()]; }
+    const [y, m] = R.ym, days = monthDays(y, m), t = today(), offs = new Set(index().off || []);
+    const planned = days.filter(dateOk), sent = days.filter(isSent);
+    return { y, m, days, t, offs, planned, sent, missing: planned.filter(d => !isSent(d) && d < t), pend: planned.indexOf(t) > -1 && !isSent(t) };
+  }
+  function openReports() {
+    S.view = 'reports'; S.draft = null; S.editing = false;
+    if (!RTABS().some(x => x[0] === R.tab)) R.tab = 'sum';
+    rcLoad(); renderReports(true); window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function renderReports(animate) {
+    const p = $('#panel'); if (!p || S.view !== 'reports') return;
+    p.classList.toggle('anim', !!animate);
+    const M = rMonth(), ss = cfg().seasonStart, tm = parse(M.t);
+    const limit = ss ? parse(ss) : new Date(tm.getFullYear() - 1, tm.getMonth(), 1);
+    const canPrev = M.y > limit.getFullYear() || (M.y === limit.getFullYear() && M.m > limit.getMonth());
+    const canNext = M.y < tm.getFullYear() || (M.y === tm.getFullYear() && M.m < tm.getMonth());
+    let body;
+    if (R.tab === 'sum') body = repSummary(M);
+    else {
+      const need = M.sent.filter(d => !recOf(d));
+      if (need.length && !R.busy && !R.err) setTimeout(() => repFetch(need), 0);
+      body = repProgress(M) + ({ att: repAtt, rec: repRec, teach: repTeach })[R.tab](M);
+    }
+    p.innerHTML = `
+      <div class="jhead" style="--i:0">
+        <button class="icon-btn sm plain" data-act="home" aria-label="رجوع للبداية" title="رجوع للبداية">${ic('x')}</button>
+        <h3>تقاريري</h3>
+      </div>
+      <div class="rtabs" role="tablist" style="--i:1">${RTABS().map(([k, t]) => `<button role="tab" data-act="rep-tab" data-t="${k}" aria-selected="${R.tab === k}" class="${R.tab === k ? 'on' : ''}">${t}</button>`).join('')}</div>
+      <div class="cal-nav rmonth" style="--i:2">
+        <button class="icon-btn sm plain" data-act="rep-month" data-dir="-1" ${canPrev ? '' : 'disabled'} aria-label="الشهر السابق">${ic('chevR')}</button>
+        <b>${MONTH.format(new Date(M.y, M.m, 1))}</b>
+        <button class="icon-btn sm plain" data-act="rep-month" data-dir="1" ${canNext ? '' : 'disabled'} aria-label="الشهر التالي">${ic('chevL')}</button>
+      </div>
+      <div id="repBody">${body}</div>`;
+    renderNav();
+  }
+  const rkpi = (label, val, tone, sub) => `<div class="rkpi"><span>${label}</span><b style="color:${tone || 'var(--ink)'}">${val}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
+  const pctTxt = (a, b) => (b ? (Math.round(a * 1000 / b) / 10) + '%' : '—');
+
+  // ① الرزنامة: أُرسل / لم يُرسل / لم تُقدَّم الحصة / عطلة — فورية من الفهرس
+  function repSummary(M) {
+    const first = new Date(M.y, M.m, 1), offset = WEEK.indexOf(first.getDay());
+    let cells = WEEK.map(w => `<span class="wd">${WD_SHORT[w]}</span>`).join('');
+    for (let i = 0; i < offset; i++) cells += '<span></span>';
+    M.days.forEach((s, i) => {
+      const h = isTeach(s) && holiday(s), sent = isSent(s), plan = M.planned.indexOf(s) > -1;
+      const st = sent ? (M.offs.has(s) ? 'r-off' : 'r-sent') : (plan && s < M.t ? 'r-miss' : (s === M.t && plan ? 'r-pend' : ''));
+      const can = st === 'r-miss' || st === 'r-pend';
+      const cls = ['cd', plan || sent ? 'teach' : '', h ? 'hol' : '', st, s === M.t ? 'today' : ''].join(' ');
+      const title = h ? h.reason : st === 'r-off' ? 'لم تُقدَّم الحصة' : st === 'r-sent' ? 'أُرسل' : can ? 'اضغط لكتابة التقرير' : '';
+      cells += `<button class="${cls}" ${can ? `data-act="rep-new" data-d="${s}"` : 'disabled tabindex="-1"'}${title ? ` title="${esc(title)}"` : ''}>${i + 1}</button>`;
+    });
+    const miss = M.missing;
+    return `
+      <div class="rkpis" style="--i:3">
+        ${rkpi('الحصص المقررة', M.planned.length)}
+        ${rkpi('أرسلتُ', M.sent.length, 'var(--ok)', M.offs.size && M.sent.some(d => M.offs.has(d)) ? `منها ${M.sent.filter(d => M.offs.has(d)).length} لم تُقدَّم` : '')}
+        ${rkpi('لم أُرسل', miss.length, miss.length ? 'var(--bad)' : 'var(--ink)')}
+      </div>
+      <div class="card" style="--i:4">
+        <div class="cal-grid rcal">${cells}</div>
+        <div class="cal-legend"><span><i class="lr-sent"></i>أُرسل</span><span><i class="lr-miss"></i>لم يُرسل</span><span><i class="lr-off"></i>لم تُقدَّم الحصة</span><span><i class="l5"></i>عطلة</span></div>
+      </div>
+      ${miss.length ? `<div class="nudge rmiss" style="--i:5"><span class="badge">${ic('info')}</span><div><b>${miss.length === 1 ? 'تقرير لم يُرسل' : miss.length + ' تقارير لم تُرسل'}</b><small>${miss.map(d => esc(dLabel(d).full)).join(' · ')}<br>اضغط على اليوم الأحمر في الرزنامة لكتابته</small></div></div>`
+        : (M.planned.length ? `<p class="rok" style="--i:5">${ic('check')} أرسلتَ كل تقارير هذا الشهر، بارك الله فيك</p>` : '')}`;
+  }
+
+  // تنزيل تقارير الشهر (مرة واحدة) — اثنان في وقت واحد، مع شريط تقدم
+  async function repFetch(dates) {
+    const run = ++R.run, cid = S.cls.id;
+    R.busy = true; R.err = ''; R.done = 0; R.total = dates.length;
+    const queue = dates.slice();
+    const worker = async () => {
+      while (queue.length && run === R.run && !R.err) {
+        const d = queue.shift();
+        try { await fetchRecord(d); }
+        catch (x) { if (x.code !== 'NOT_FOUND') { R.err = x.message; break; } }
+        R.done++;
+        const bar = $('#repBar'); if (bar) { bar.style.setProperty('--v', Math.round(R.done * 100 / R.total)); $('#repBarT').textContent = `جارٍ تنزيل تقارير الشهر ${R.done}/${R.total}`; }
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    if (run !== R.run) return;
+    R.busy = false;
+    if (S.cls && S.cls.id === cid) rcPersist(dates);
+    if (S.view === 'reports' && S.cls && S.cls.id === cid) renderReports(false);
+  }
+  function repProgress(M) {
+    if (R.err) return `<div class="card rprog err">${ic('info')}<div><b>لم تكتمل التقارير</b><small>${esc(R.err)}</small></div><button class="btn btn-soft btn-sm" data-act="rep-retry">إعادة</button></div>`;
+    const need = M.sent.filter(d => !recOf(d)).length;
+    if (!need) return '';
+    const v = R.total ? Math.round(R.done * 100 / R.total) : 0;
+    return `<div class="card rprog"><div class="rbar" id="repBar" style="--v:${v}"><i></i></div><small id="repBarT">جارٍ تنزيل تقارير الشهر ${R.done}/${R.total || need}</small><small class="muted">مرة واحدة فقط، ثم تبقى محفوظة في هاتفك</small></div>`;
+  }
+  const loadedRecs = M => M.sent.map(d => [d, recOf(d)]).filter(x => x[1]);
+  const partial = (M, n) => (n < M.sent.length ? `<p class="rnote">${ic('info')} محسوبة من ${n} من ${M.sent.length} تقريراً حتى الآن</p>` : '');
+  const shortD = d => { const x = parse(d); return x.getDate() + '/' + (x.getMonth() + 1); };
+
+  // ② حضور تلاميذي
+  function repAtt(M) {
+    const list = cfg().lists.attendance, absent = absentLabel(), late = list[2];
+    const recs = loadedRecs(M).filter(x => !(x[1].log.off && x[1].log.off.on));
+    if (!recs.length) return M.sent.length ? '' : emptyState('لا توجد تقارير مرسلة في هذا الشهر');
+    let marked = 0, abs = 0, lt = 0;
+    const rows = students().map(s => {
+      const o = { name: s.name, a: 0, l: 0, n: 0, last: '' };
+      recs.forEach(([d, r]) => { const v = r.att[s.id]; if (!v) return; o.n++; if (v === absent) { o.a++; if (d > o.last) o.last = d; } else if (late && v === late) o.l++; });
+      marked += o.n; abs += o.a; lt += o.l; return o;
+    }).sort((a, b) => b.a - a.a || b.l - a.l || a.name.localeCompare(b.name, 'ar'));
+    const follow = rows.filter(o => o.n && o.a > o.n / 3).length;
+    return `
+      <div class="rkpis two" style="--i:3">
+        ${rkpi('نسبة الحضور', pctTxt(marked - abs, marked), 'var(--ok)', `غياب ${abs} · ${esc(late || 'تأخر')} ${lt}`)}
+        ${rkpi('تلاميذ للمتابعة', follow, follow ? 'var(--bad)' : 'var(--ink)', 'غابوا أكثر من ثلث الحصص')}
+      </div>
+      ${partial(M, recs.length + loadedRecs(M).filter(x => x[1].log.off && x[1].log.off.on).length)}
+      <div class="card rtable" style="--i:4">
+        <div class="rt-h"><span>التلميذ</span><span>غاب</span><span>${esc(late || 'تأخر')}</span><span>آخر غياب</span></div>
+        ${rows.map(o => `<div class="rt-r"><span>${esc(o.name)}</span><b class="${o.a >= 2 ? 'bad' : o.a ? 'warn' : ''}">${o.a}</b><span>${o.l}</span><small>${o.last ? shortD(o.last) : '—'}</small></div>`).join('')}
+      </div>`;
+  }
+
+  // ③ استظهار تلاميذي
+  function repRec(M) {
+    const absent = absentLabel(), g = grades(), recs = loadedRecs(M).filter(x => !(x[1].log.off && x[1].log.off.on));
+    if (!recs.length) return M.sent.length ? '' : emptyState('لا توجد تقارير مرسلة في هذا الشهر');
+    const by = g.map(() => 0); let done = 0, not = 0;
+    const rows = students().map(s => {
+      const o = { name: s.name, p: 0, y: 0, top: 0, no: 0 };
+      recs.forEach(([, r]) => {
+        if (!r.att[s.id] || r.att[s.id] === absent) return;
+        const v = r.rec[s.id]; if (v == null) return;
+        o.p++;
+        if (v === false) o.no++; else { o.y++; const i = g.indexOf(v); if (i > -1) by[i]++; if (i === 0) o.top++; }
+      });
+      done += o.y; not += o.no; return o;
+    }).sort((a, b) => b.no - a.no || a.name.localeCompare(b.name, 'ar'));
+    const pct = done + not ? done * 100 / (done + not) : 0;
+    return `
+      <div class="card rrec" style="--i:3">
+        <div class="rrec-h"><span>نسبة الاستظهار من الحاضرين</span><b>${pctTxt(done, done + not)}</b></div>
+        <div class="rbar solid" style="--v:${pct}"><i></i></div>
+        <div class="rgrades">${g.map((x, i) => `<div style="--tone:${GRADE_TONES[i] || 'var(--p)'}"><b>${by[i]}</b><span>${esc(x)}</span></div>`).join('')}</div>
+        <small class="muted">استظهر ${done} مرة من ${done + not} حضوراً · لم يستظهر ${not}</small>
+      </div>
+      ${partial(M, recs.length + loadedRecs(M).filter(x => x[1].log.off && x[1].log.off.on).length)}
+      <div class="card rtable" style="--i:4">
+        <div class="rt-h"><span>التلميذ</span><span>استظهر</span><span>${esc(g[0] || '')}</span><span>لم يستظهر</span></div>
+        ${rows.map(o => `<div class="rt-r"><span>${esc(o.name)}</span><span>${o.y}/${o.p}</span><span class="ok">${o.top}</span><b class="${o.no >= 3 ? 'bad' : o.no ? 'warn' : ''}">${o.no}</b></div>`).join('')}
+      </div>`;
+  }
+
+  // ④ تدريسي وملاحظاتي
+  function repTeach(M) {
+    const all = loadedRecs(M);
+    if (!all.length) return M.sent.length ? '' : emptyState('لا توجد تقارير مرسلة في هذا الشهر');
+    let lessons = 0, withTools = 0, quran = 0; const strat = {}, notes = [];
+    all.forEach(([d, r]) => {
+      const L = r.log;
+      if (L.off && L.off.on) { notes.push({ d, k: 'لم تُقدَّم', c: 'off', t: [L.off.reason, L.off.note].filter(Boolean).join(' — ') }); return; }
+      if (isMain() && (L.quran.type || S.cls.type === T.MUNAFASA)) quran++;
+      L.lessons.forEach(l => { if (!l.subject && !l.lesson) return; lessons++; if (l.tools.length) withTools++; l.strategies.forEach(s => { strat[s] = (strat[s] || 0) + 1; }); });
+      if (L.quran.notes) notes.push({ d, k: 'قرآن', c: 'qur', t: L.quran.notes });
+      if (L.notes) notes.push({ d, k: 'عامة', c: 'gen', t: L.notes });
+    });
+    const st = Object.keys(strat).map(k => [k, strat[k]]).sort((a, b) => b[1] - a[1]);
+    const max = st.length ? st[0][1] : 1;
+    notes.sort((a, b) => (a.d < b.d ? 1 : -1));
+    return `
+      <div class="rkpis" style="--i:3">
+        ${rkpi('دروس مسجّلة', lessons)}
+        ${isMain() ? rkpi('حصص قرآن', quran) : rkpi('تقارير', all.length)}
+        ${rkpi('بوسيلة', `${withTools}<small> / ${lessons}</small>`)}
+      </div>
+      ${partial(M, all.length)}
+      <div class="card" style="--i:4">
+        <div class="sec-h"><span class="badge">${ic('book')}</span><div><b>الاستراتيجيات التي استعملتُها</b><small>عدد الحصص لكل استراتيجية</small></div></div>
+        ${st.length ? st.map(([k, n]) => `<div class="rstrat"><div><span>${esc(k)}</span><b>${n}</b></div><div class="rbar thin" style="--v:${n * 100 / max}"><i></i></div></div>`).join('') : '<p class="muted">لم تُسجَّل استراتيجيات في هذا الشهر</p>'}
+      </div>
+      <div class="card" style="--i:5">
+        <div class="sec-h"><span class="badge">${ic('note')}</span><div><b>ملاحظاتي</b><small>${notes.length} ملاحظة</small></div></div>
+        ${notes.length ? notes.map(n => `<div class="rnoteitem"><div><b>${esc(dLabel(n.d).full)}</b><span class="ntag ${n.c}">${n.k}</span></div><p>${esc(n.t)}</p></div>`).join('') : '<p class="muted">لا توجد ملاحظات في هذا الشهر</p>'}
+      </div>`;
+  }
+
+  /* ═════════════ صورة الاستظهار لمجموعة الأولياء (تُصنع في الهاتف بدقة عالية) ═════════════ */
+  const DFULL = new Intl.DateTimeFormat('ar', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', numberingSystem: 'latn' });
+  function shareData(d) {
+    const absent = absentLabel(), done = [], notDone = [], abs = [];
+    students().forEach(s => {
+      if (d.att[s.id] === absent) abs.push(s.name);
+      else if (d.rec[s.id] === false) notDone.push(s.name);
+      else if (d.rec[s.id] != null) done.push({ name: s.name, grade: isGrade(d.rec[s.id]) ? d.rec[s.id] : '' });
+    });
+    return { school: str(cfg().school) || 'مدرسة نور السلام القرآنية', cls: S.cls.name, date: DFULL.format(parse(d.date)), iso: d.date, teacher: S.session.teacher.name, done, notDone, abs };
+  }
+  const GRADE_COL = [['#DFF3EA', '#176B47'], ['#E0F1FB', '#12509F'], ['#FCEFD9', '#8A560A'], ['#E3F4FA', '#0C6A8A'], ['#EDF2F7', '#4A6178']];
+  function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+  function fit(c, text, max, size, min, weight, fam) {
+    let s = size; c.font = `${weight} ${s}px ${fam}`;
+    while (c.measureText(text).width > max && s > min) { s -= 2; c.font = `${weight} ${s}px ${fam}`; }
+    if (c.measureText(text).width <= max) return text;
+    let t = text; while (t.length > 1 && c.measureText(t + '…').width > max) t = t.slice(0, -1);
+    return t + '…';
+  }
+  async function drawShare(D, withGrades) {
+    const FN = '"Noto Naskh Arabic", serif', FU = 'Changa, sans-serif', FD = 'Amiri, serif';
+    try { await Promise.all(['700 52px Amiri', '600 34px Changa', '700 64px Changa', '600 32px "Noto Naskh Arabic"'].map(f => document.fonts.load(f, 'نور'))); } catch (e) {}
+    const W = 1080, K = 2, M = 56, IW = W - 2 * M;
+    const rowsDone = Math.max(1, Math.ceil(D.done.length / 2));
+    const boxDone = 32 + 54 + 18 + rowsDone * 72 + (rowsDone - 1) * 14 + 32;
+    const sideN = Math.max(1, D.notDone.length, D.abs.length);
+    const boxSide = 28 + 50 + 14 + sideN * 60 + (sideN - 1) * 12 + 28;
+    const H = 300 + 150 - 70 + 28 + boxDone + 24 + boxSide + 110;
+    const cv = document.createElement('canvas'); cv.width = W * K; cv.height = H * K;
+    const c = cv.getContext('2d'); c.scale(K, K); c.direction = 'rtl'; c.textBaseline = 'middle';
+    c.fillStyle = '#EEF5FB'; c.fillRect(0, 0, W, H);
+    const g = c.createLinearGradient(W, 0, 0, 300); g.addColorStop(0, '#1CB5E0'); g.addColorStop(.55, '#1769CF'); g.addColorStop(1, '#11389A');
+    c.fillStyle = g; c.fillRect(0, 0, W, 300);
+    c.fillStyle = '#FFFFFF'; c.textAlign = 'center';
+    c.font = `700 52px ${FD}`; c.fillText(fit(c, D.school, IW, 52, 34, 700, FD), W / 2, 84);
+    c.font = `600 34px ${FU}`; c.fillText('حصيلة الاستظهار', W / 2, 148);
+    c.globalAlpha = .92; c.font = `400 28px ${FU}`; c.fillText(fit(c, D.cls + ' · ' + D.date, IW, 28, 20, 400, FU), W / 2, 198); c.globalAlpha = 1;
+    // البطاقات الثلاث
+    const cw = (IW - 40) / 3, cy = 230;
+    [[D.done.length, 'استظهروا', '#1E8E5E'], [D.notDone.length, 'لم يستظهروا', '#C47A0F'], [D.abs.length, 'غائبون', '#5F7891']].forEach(([n, t, col], i) => {
+      const x = W - M - (i + 1) * cw - i * 20;
+      c.save(); c.shadowColor = 'rgba(10,45,100,.22)'; c.shadowBlur = 30; c.shadowOffsetY = 12; c.fillStyle = '#FFFFFF'; rr(c, x, cy, cw, 150, 28); c.fill(); c.restore();
+      c.textAlign = 'center'; c.fillStyle = col; c.font = `700 64px ${FU}`; c.fillText(String(n), x + cw / 2, cy + 62);
+      c.fillStyle = '#4A6178'; c.font = `500 26px ${FU}`; c.fillText(t, x + cw / 2, cy + 118);
+    });
+    // استظهروا
+    let y = cy + 150 + 28;
+    c.fillStyle = '#FFFFFF'; rr(c, M, y, IW, boxDone, 32); c.fill();
+    c.strokeStyle = '#1E8E5E'; c.lineWidth = 4; c.beginPath(); c.arc(W - M - 36 - 20, y + 32 + 27, 18, 0, Math.PI * 2); c.stroke();
+    c.beginPath(); c.moveTo(W - M - 36 - 29, y + 32 + 28); c.lineTo(W - M - 36 - 22, y + 32 + 35); c.lineTo(W - M - 36 - 10, y + 32 + 21); c.stroke();
+    c.textAlign = 'right'; c.fillStyle = '#1E8E5E'; c.font = `700 36px ${FU}`; c.fillText('استظهروا', W - M - 36 - 52, y + 32 + 27);
+    const colW = (IW - 72 - 22) / 2, gy = y + 32 + 54 + 18;
+    if (!D.done.length) { c.fillStyle = '#5F7891'; c.font = `500 28px ${FN}`; c.fillText('لا أحد', W - M - 36, gy + 36); }
+    D.done.forEach((s, i) => {
+      const col = i % 2, row = Math.floor(i / 2), xr = W - M - 36 - col * (colW + 22), yy = gy + row * 86;
+      c.fillStyle = '#F4F9FD'; rr(c, xr - colW, yy, colW, 72, 18); c.fill();
+      let chipW = 0;
+      if (withGrades && s.grade) {
+        const gi = Math.max(0, grades().indexOf(s.grade)), pal = GRADE_COL[gi] || GRADE_COL[4];
+        c.font = `600 24px ${FU}`; chipW = c.measureText(s.grade).width + 36;
+        c.fillStyle = pal[0]; rr(c, xr - colW + 16, yy + 16, chipW, 40, 20); c.fill();
+        c.fillStyle = pal[1]; c.textAlign = 'center'; c.fillText(s.grade, xr - colW + 16 + chipW / 2, yy + 37);
+      } else {
+        c.fillStyle = '#1E8E5E'; c.beginPath(); c.arc(xr - 26, yy + 36, 7, 0, Math.PI * 2); c.fill();
+      }
+      const nameR = withGrades && s.grade ? xr - 20 : xr - 46, nameMax = colW - (withGrades && s.grade ? chipW + 52 : 66);
+      c.textAlign = 'right'; c.fillStyle = '#0F2238'; c.fillText(fit(c, s.name, nameMax, 32, 22, 600, FN), nameR, yy + 38);
+    });
+    // لم يستظهروا + غائبون
+    y += boxDone + 24;
+    const sw = (IW - 24) / 2;
+    [[D.notDone, 'لم يستظهروا', '#A2650C', '#FCEFD9', '#0F2238'], [D.abs, 'غائبون', '#4A6178', '#EDF2F7', '#4A6178']].forEach(([arr, t, tc, bg, fg], i) => {
+      const xr = W - M - i * (sw + 24);
+      c.fillStyle = '#FFFFFF'; rr(c, xr - sw, y, sw, boxSide, 32); c.fill();
+      c.textAlign = 'right'; c.fillStyle = tc; c.font = `700 32px ${FU}`; c.fillText(t, xr - 32, y + 28 + 25);
+      if (!arr.length) { c.fillStyle = '#5F7891'; c.font = `500 28px ${FN}`; c.fillText('لا أحد', xr - 32, y + 28 + 50 + 14 + 30); }
+      arr.forEach((n, k) => {
+        const yy = y + 28 + 50 + 14 + k * 72;
+        c.fillStyle = bg; rr(c, xr - sw + 32, yy, sw - 64, 60, 16); c.fill();
+        c.fillStyle = fg; c.textAlign = 'right'; c.fillText(fit(c, n, sw - 104, 30, 20, 600, FN), xr - 50, yy + 32);
+      });
+    });
+    // التذييل
+    c.fillStyle = '#4A6178'; c.font = `500 24px ${FU}`;
+    c.textAlign = 'right'; c.fillText(fit(c, 'المعلم: ' + D.teacher, IW / 2, 24, 18, 500, FU), W - M, H - 52);
+    c.textAlign = 'left'; c.fillText('بارك الله في أبنائنا', M, H - 52);
+    return new Promise(res => cv.toBlob(b => res(b), 'image/png'));
+  }
+  async function openShare(D) {
+    S.share = { D, file: null, url: '' };
+    const on = LS.get('imgGrades', true);
+    openSheet(`
+      <div class="sheet-h"><b>صورة الاستظهار للأولياء</b><button class="icon-btn sm plain" data-act="sheet-close" aria-label="إغلاق">${ic('x')}</button></div>
+      <label class="switch"><input type="checkbox" id="imgGrades" ${on ? 'checked' : ''}><span></span>إظهار نوعية الحفظ</label>
+      <div class="imgprev" id="imgPrev"><div class="sk img"></div></div>
+      <div class="share-acts">
+        <button class="btn btn-primary" data-act="img-share" disabled>${ic('send')} مشاركة في الواتساب</button>
+        <button class="btn btn-ghost" data-act="img-save" disabled>${ic('download')} تنزيل</button>
+      </div>
+      <p class="muted share-tip">اختر مجموعة الأولياء في الواتساب، وفعّل خيار HD قبل الإرسال لتبقى الصورة واضحة.</p>`);
+    await buildShare();
+  }
+  async function buildShare() {
+    const sh = S.share; if (!sh) return;
+    const on = !!($('#imgGrades') || {}).checked, tok = sh.tok = (sh.tok || 0) + 1;
+    $$('[data-act="img-share"],[data-act="img-save"]').forEach(b => { b.disabled = true; });
+    const blob = await drawShare(sh.D, on);
+    if (S.share !== sh || sh.tok !== tok || !blob) return;
+    if (sh.url) URL.revokeObjectURL(sh.url);
+    sh.url = URL.createObjectURL(blob);
+    sh.file = new File([blob], `استظهار-${sh.D.cls}-${sh.D.iso}.png`.replace(/[\\/:*?"<>|\s]+/g, '-'), { type: 'image/png' });
+    const box = $('#imgPrev'); if (box) box.innerHTML = `<img src="${sh.url}" alt="صورة حصيلة الاستظهار">`;
+    $$('[data-act="img-share"],[data-act="img-save"]').forEach(b => { b.disabled = false; });
+  }
+  async function shareImg() {
+    const sh = S.share; if (!sh || !sh.file) return;
+    if (navigator.canShare && navigator.canShare({ files: [sh.file] })) {
+      try { await navigator.share({ files: [sh.file], title: 'حصيلة الاستظهار' }); }
+      catch (e) { if (e.name !== 'AbortError') { toast('تعذّرت المشاركة، نُزّلت الصورة بدلاً منها', 'warn'); saveImg(); } }
+    } else { saveImg(); toast('هاتفك لا يدعم المشاركة المباشرة: نُزّلت الصورة، أرسلها من الواتساب', 'warn'); }
+  }
+  function saveImg() {
+    const sh = S.share; if (!sh || !sh.url) return;
+    const a = document.createElement('a'); a.href = sh.url; a.download = sh.file.name; document.body.appendChild(a); a.click(); a.remove();
   }
 
   /* ───────────── الأحداث ───────────── */
@@ -855,7 +1191,26 @@
       case 'discard': { if (!confirm('حذف التقرير غير المكتمل؟')) return; dropDraft(); return renderHome(false); }
       case 'details': { S.homeOpen = !S.homeOpen; return renderHome(false); }
       case 'edit': return startEdit(b);
-      case 'home': return goHome();
+      case 'home': return S.view === 'reports' ? (renderHome(true), window.scrollTo({ top: 0, behavior: 'smooth' })) : goHome();
+      /* تقاريري */
+      case 'reports': return openReports();
+      case 'rep-tab': { R.tab = b.dataset.t; return renderReports(false); }
+      case 'rep-month': {
+        const [y, m] = R.ym, nd = new Date(y, m + Number(b.dataset.dir), 1);
+        R.ym = [nd.getFullYear(), nd.getMonth()]; R.run++; R.busy = false; R.err = '';
+        return renderReports(false);
+      }
+      case 'rep-retry': { R.err = ''; return renderReports(false); }
+      case 'rep-new': {
+        const dt = b.dataset.d; if (!pickable(dt)) return;
+        const dr = savedDraft();
+        if (dr && !confirm('لديك تقرير غير مكتمل. حذفه والبدء بتقرير ' + dLabel(dt).full + '؟')) return;
+        dropDraft();
+        return startJourney({ date: dt, att: {}, rec: {}, log: freshLog(), step: 0, dirty: true }, false);
+      }
+      /* صورة الأولياء */
+      case 'img-share': return shareImg();
+      case 'img-save': return saveImg();
     }
     if (S.view !== 'journey' || !S.draft) return;
     const d = S.draft;
@@ -936,6 +1291,9 @@
     }
   });
 
+  document.addEventListener('change', e => {
+    if (e.target.id === 'imgGrades') { LS.set('imgGrades', e.target.checked); buildShare(); }
+  });
   app.addEventListener('input', e => {
     const el = e.target.closest('[data-bind]'); if (!el || !S.draft) return;
     setPath(S.draft, el.dataset.bind, el.value);
