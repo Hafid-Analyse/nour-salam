@@ -495,7 +495,7 @@ textarea.inp { min-height: 110px; resize: vertical; }
 .resume small { color: var(--muted); font-size: .8rem; }
 .resume .badge { width: 36px; height: 36px; border-radius: 11px; background: linear-gradient(135deg, #F2B544, var(--warn)); }
 .resume .badge .ic { width: 18px; height: 18px; }
-.home-acts { display: flex; gap: 8px; padding: 10px 14px 12px; }
+.home-acts { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px 12px; }
 .home-acts .btn { flex: 1; }
 .home-card .report-b { border-top: 1px solid var(--line); }
 .ic.flip { transform: rotate(180deg); }

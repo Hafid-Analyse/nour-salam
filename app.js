@@ -418,6 +418,7 @@
           <div class="home-acts">
             <button class="btn btn-ghost btn-sm" data-act="details">${ic('chevD', S.homeOpen ? 'flip' : '')} ${S.homeOpen ? 'إخفاء التفاصيل' : 'التفاصيل'}</button>
             <button class="btn btn-soft btn-sm" data-act="edit" ${pend ? 'disabled' : ''}>${ic('pen')} تعديل</button>
+            ${isMain() && students().length && (index().off || []).indexOf(last) < 0 ? `<button class="btn btn-soft btn-sm" data-act="last-img">${ic('send')} صورة الأولياء</button>` : ''}
           </div>
           ${S.homeOpen ? `<div class="report-b" id="reportBody">${r ? daySummary(r) : '<div class="sk line"></div><div class="sk line short"></div><div class="sk line"></div>'}</div>` : ''}
         </div>`;
@@ -749,7 +750,7 @@
     }
     // ⚡ إرسال في الخلفية: يُحفظ التقرير في "صندوق الإرسال" ويعود المعلم فوراً لصفحة البداية
     const job = { cls: S.cls.id, date: d.date, payload, editing, off: !!off, draft: Object.assign(clone(d), { editing, dirty: true }) };
-    const share = !off && !editing && isMain() && students().length ? shareData(d) : null;   // صورة الأولياء: بعد الإرسال الأول فقط
+    const share = !off && isMain() && students().length ? shareData(d) : null;   // صورة الأولياء: بعد إرسال آخر تقرير أو تعديله
     LS.set('outbox.' + job.cls, job);
     applyLocal(job);
     dropDraft();
@@ -1127,6 +1128,19 @@
     c.textAlign = 'left'; c.fillText('بارك الله في أبنائنا', M, H - 52);
     return new Promise(res => cv.toBlob(b => res(b), 'image/png'));
   }
+  // صورة آخر تقرير فقط (من الهاتف إن وُجد، وإلا يُجلب من الخادم)
+  async function lastImg(btn) {
+    const last = index().last; if (!last) return;
+    let r = recOf(last);
+    if (!r) {
+      setBusy(btn, true);
+      try { r = await fetchRecord(last); }
+      catch (x) { toast(x.message, 'bad'); if (x.code === 'NOT_FOUND') refreshIndex(); return; }
+      finally { setBusy(btn, false); }
+    }
+    if (r.log.off && r.log.off.on) return toast('لم تُقدَّم حصة في آخر تقرير', 'warn');
+    openShare(shareData({ date: last, att: r.att, rec: r.rec }));
+  }
   async function openShare(D) {
     S.share = { D, file: null, url: '' };
     const on = LS.get('imgGrades', true);
@@ -1209,6 +1223,7 @@
         return startJourney({ date: dt, att: {}, rec: {}, log: freshLog(), step: 0, dirty: true }, false);
       }
       /* صورة الأولياء */
+      case 'last-img': return lastImg(b);
       case 'img-share': return shareImg();
       case 'img-save': return saveImg();
     }
