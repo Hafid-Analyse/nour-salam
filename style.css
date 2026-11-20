@@ -612,3 +612,25 @@ textarea.inp { min-height: 110px; resize: vertical; }
 .sk.img { height: 360px; margin: 0; border-radius: 0; }
 .share-acts { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; margin-top: 12px; }
 .share-tip { font-size: .8rem; margin-top: 10px; text-align: center; }
+
+/* ═════════ نافذة تفاصيل اليوم ═════════ */
+.dm-wrap { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+.dm-bg { position: absolute; inset: 0; background: rgba(6, 22, 48, .5); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); opacity: 0; transition: opacity .25s; }
+.dm { position: relative; width: min(100%, 520px); max-height: 100%; display: flex; flex-direction: column; background: var(--surface); border-radius: 24px; box-shadow: var(--shadow-lg); opacity: 0; transform: translateY(14px) scale(.97); transition: opacity .25s, transform .3s var(--ease); overflow: hidden; }
+.dm-wrap.open .dm-bg { opacity: 1; }
+.dm-wrap.open .dm { opacity: 1; transform: none; }
+.dm-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px 12px; border-bottom: 1px solid var(--line); flex: none; }
+.dm-h > div { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.dm-h b { font-family: var(--f-ui); font-size: 1.05rem; }
+.dtag { font-family: var(--f-ui); font-size: .74rem; font-weight: 600; border-radius: 99px; padding: 1px 10px; }
+.dtag.ok { background: var(--ok-soft); color: var(--ok); }
+.dtag.off { background: var(--warn-soft); color: var(--warn); }
+.dtag.miss { background: var(--bad-soft); color: var(--bad); }
+.dtag.hol { background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
+.dm-b { overflow-y: auto; overscroll-behavior: contain; padding: 4px 16px 18px; -webkit-overflow-scrolling: touch; }
+.dm-note { display: flex; gap: 12px; align-items: flex-start; background: var(--surface-2); border-radius: 16px; padding: 14px; margin-top: 12px; }
+.dm-note.miss { background: var(--bad-soft); }
+.dm-note b { display: block; font-family: var(--f-ui); font-weight: 600; }
+.dm-note small { font-size: .85rem; color: var(--muted); }
+.dm-go { width: 100%; margin-top: 12px; height: 48px; }
+.rcal .cd[data-act="rep-day"] { cursor: pointer; pointer-events: auto; }

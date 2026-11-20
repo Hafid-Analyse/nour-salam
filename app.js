@@ -901,10 +901,10 @@
     M.days.forEach((s, i) => {
       const h = isTeach(s) && holiday(s), sent = isSent(s), plan = M.planned.indexOf(s) > -1;
       const st = sent ? (M.offs.has(s) ? 'r-off' : 'r-sent') : (plan && s < M.t ? 'r-miss' : (s === M.t && plan ? 'r-pend' : ''));
-      const can = st === 'r-miss' || st === 'r-pend';
+      const can = !!st || !!h;   // أُرسل / لم يُرسل / لم تُقدَّم / اليوم / عطلة ← نافذة تفاصيل اليوم
       const cls = ['cd', plan || sent ? 'teach' : '', h ? 'hol' : '', st, s === M.t ? 'today' : ''].join(' ');
-      const title = h ? h.reason : st === 'r-off' ? 'لم تُقدَّم الحصة' : st === 'r-sent' ? 'أُرسل' : can ? 'اضغط لكتابة التقرير' : '';
-      cells += `<button class="${cls}" ${can ? `data-act="rep-new" data-d="${s}"` : 'disabled tabindex="-1"'}${title ? ` title="${esc(title)}"` : ''}>${i + 1}</button>`;
+      const title = h ? h.reason : st === 'r-off' ? 'لم تُقدَّم الحصة' : st === 'r-sent' ? 'أُرسل' : can ? 'لم يُرسل' : '';
+      cells += `<button class="${cls}" ${can ? `data-act="rep-day" data-d="${s}"` : 'disabled tabindex="-1"'}${title ? ` title="${esc(title)}"` : ''}>${i + 1}</button>`;
     });
     const miss = M.missing;
     return `
@@ -917,7 +917,7 @@
         <div class="cal-grid rcal">${cells}</div>
         <div class="cal-legend"><span><i class="lr-sent"></i>أُرسل</span><span><i class="lr-miss"></i>لم يُرسل</span><span><i class="lr-off"></i>لم تُقدَّم الحصة</span><span><i class="l5"></i>عطلة</span></div>
       </div>
-      ${miss.length ? `<div class="nudge rmiss" style="--i:5"><span class="badge">${ic('info')}</span><div><b>${miss.length === 1 ? 'تقرير لم يُرسل' : miss.length + ' تقارير لم تُرسل'}</b><small>${miss.map(d => esc(dLabel(d).full)).join(' · ')}<br>اضغط على اليوم الأحمر في الرزنامة لكتابته</small></div></div>`
+      ${miss.length ? `<div class="nudge rmiss" style="--i:5"><span class="badge">${ic('info')}</span><div><b>${miss.length === 1 ? 'تقرير لم يُرسل' : miss.length + ' تقارير لم تُرسل'}</b><small>${miss.map(d => esc(dLabel(d).full)).join(' · ')}<br>اضغط على أي يوم في الرزنامة لرؤية تفاصيله</small></div></div>`
         : (M.planned.length ? `<p class="rok" style="--i:5">${ic('check')} أرسلتَ كل تقارير هذا الشهر، بارك الله فيك</p>` : '')}`;
   }
 
@@ -1039,6 +1039,69 @@
       </div>`;
   }
 
+  /* نافذة تفاصيل يوم (من رزنامة تقاريري) — في الوسط مع فراغ حولها، تُغلق بالضغط خارجها أو بزر الرجوع */
+  function dayDetail(r) {
+    if (r.log.off && r.log.off.on) return sec('الحصة لم تُقدَّم', logRows(r.log));
+    let out = '';
+    if (isMain()) {
+      const list = cfg().lists.attendance, c = attCounts(r.att);
+      const names = list.slice(1).map(st => { const n = namesBy(r.att, v => v === st); return n.length ? `<li><b>${esc(st)}</b><span>${esc(n.join('، '))}</span></li>` : ''; }).join('');
+      out += sec('الحضور', `<div class="tally">${list.map((x, i) => `<span style="--tone:${TONES[i] || 'var(--p)'}"><i></i>${esc(x)} <b>${c.by[x] || 0}</b></span>`).join('')}</div>${names ? `<ul class="sum">${names}</ul>` : ''}`);
+      const g = grades(), rows = [];
+      g.forEach(x => { const n = namesBy(r.rec, v => v === x); if (n.length) rows.push([x, n]); });
+      const plain = namesBy(r.rec, v => v === true || (v != null && v !== false && g.indexOf(v) < 0));
+      if (plain.length) rows.push(['استظهر', plain]);
+      const no = namesBy(r.rec, v => v === false);
+      const y = rows.reduce((a, x) => a + x[1].length, 0);
+      out += sec('الاستظهار', `<div class="tally"><span style="--tone:var(--ok)"><i></i>استظهر <b>${y}</b></span><span style="--tone:var(--bad)"><i></i>لم يستظهر <b>${no.length}</b></span></div>
+        <ul class="sum">${rows.map(([t, n]) => `<li><b>${esc(t)}</b><span>${esc(n.join('، '))}</span></li>`).join('')}${no.length ? `<li><b>لم يستظهر</b><span>${esc(no.join('، '))}</span></li>` : ''}</ul>`);
+    }
+    out += sec('السجل اليومي', logRows(r.log));
+    return out;
+  }
+  let dmPushed = false;
+  function openDay(d) {
+    closeDay(true);
+    const sent = isSent(d), h = sent ? null : holiday(d), off = (index().off || []).indexOf(d) > -1;   // تقرير مرسل يُقدَّم على العطلة
+    const tag = h ? ['عطلة', 'hol'] : off ? ['لم تُقدَّم الحصة', 'off'] : sent ? ['أُرسل', 'ok'] : ['لم يُرسل', 'miss'];
+    const el = document.createElement('div');
+    el.className = 'dm-wrap';
+    el.innerHTML = `<div class="dm-bg" data-act="day-close"></div>
+      <div class="dm" role="dialog" aria-modal="true" aria-label="${esc(dLabel(d).full)}">
+        <div class="dm-h"><div><b>${esc(dLabel(d).full)}</b><span class="dtag ${tag[1]}">${tag[0]}</span></div><button class="icon-btn sm plain" data-act="day-close" aria-label="إغلاق">${ic('x')}</button></div>
+        <div class="dm-b report-b" id="dmBody"></div>
+      </div>`;
+    document.body.appendChild(el);
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('open')));
+    try { history.pushState({ dm: 1 }, ''); dmPushed = true; } catch (e) {}
+    const body = $('#dmBody');
+    if (h) {
+      body.innerHTML = `<div class="dm-note"><span class="badge">${ic('info')}</span><div><b>${esc(h.reason || 'عطلة')}</b><small>${h.from === h.to ? esc(dLabel(h.from).full) : `من ${esc(dLabel(h.from).full)} إلى ${esc(dLabel(h.to).full)}`}</small></div></div>`;
+      return;
+    }
+    if (!sent) {
+      body.innerHTML = `<div class="dm-note miss"><span class="badge">${ic('info')}</span><div><b>لم يُرسل تقرير هذا اليوم</b><small>${pickable(d) ? 'يمكنك كتابته الآن' : ''}</small></div></div>
+        ${pickable(d) ? `<button class="btn btn-primary dm-go" data-act="rep-new" data-d="${d}">${ic('plus')} اكتب التقرير الآن</button>` : ''}`;
+      return;
+    }
+    const r = recOf(d);
+    if (r) { body.innerHTML = dayDetail(r); return; }
+    body.innerHTML = '<div class="sk line"></div><div class="sk line short"></div><div class="sk line"></div><div class="sk line short"></div>';
+    const cid = S.cls.id;
+    fetchRecord(d).then(x => {
+      if (S.cls && S.cls.id === cid) rcPersist([d]);
+      const b = $('#dmBody'); if (b && $('.dm-wrap') === el) b.innerHTML = dayDetail(x);
+    }).catch(x => { const b = $('#dmBody'); if (b && $('.dm-wrap') === el) b.innerHTML = `<div class="dm-note miss"><span class="badge">${ic('info')}</span><div><b>تعذّر جلب التقرير</b><small>${esc(x.message)}</small></div></div>`; });
+  }
+  function closeDay(now, fromPop) {
+    const el = $('.dm-wrap'); if (!el) return;
+    if (dmPushed && !fromPop) { dmPushed = false; try { history.back(); } catch (e) {} }
+    dmPushed = false;
+    if (now) return el.remove();
+    el.classList.remove('open'); setTimeout(() => el.remove(), 260);
+  }
+  window.addEventListener('popstate', () => { if ($('.dm-wrap')) closeDay(false, true); });
+
   /* ═════════════ صورة الاستظهار لمجموعة الأولياء (تُصنع في الهاتف بدقة عالية) ═════════════ */
   const DFULL = new Intl.DateTimeFormat('ar', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', numberingSystem: 'latn' });
   function shareData(d) {
@@ -1059,6 +1122,19 @@
     let t = text; while (t.length > 1 && c.measureText(t + '…').width > max) t = t.slice(0, -1);
     return t + '…';
   }
+  let LOGO = null;
+  function logoImg() {
+    if (LOGO) return LOGO;
+    LOGO = new Promise(res => {
+      const art = document.getElementById('logo-art'); if (!art) return res(null);
+      const g = art.outerHTML.replace(/var\(--logo-ink\)/g, '#231F20').replace(/var\(--logo-accent\)/g, '#C2441C');
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="940" height="1246" viewBox="1050 102 4700 6230">${g}</svg>`;
+      const img = new Image();
+      img.onload = () => res(img); img.onerror = () => { LOGO = null; res(null); };
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    });
+    return LOGO;
+  }
   async function drawShare(D, withGrades) {
     const FN = '"Noto Naskh Arabic", serif', FU = 'Changa, sans-serif', FD = 'Amiri, serif';
     try { await Promise.all(['700 52px Amiri', '600 34px Changa', '700 64px Changa', '600 32px "Noto Naskh Arabic"'].map(f => document.fonts.load(f, 'نور'))); } catch (e) {}
@@ -1073,10 +1149,15 @@
     c.fillStyle = '#EEF5FB'; c.fillRect(0, 0, W, H);
     const g = c.createLinearGradient(W, 0, 0, 300); g.addColorStop(0, '#1CB5E0'); g.addColorStop(.55, '#1769CF'); g.addColorStop(1, '#11389A');
     c.fillStyle = g; c.fillRect(0, 0, W, 300);
+    // شعار المدرسة: دائرة بيضاء بألوانه الأصلية في يمين الشريط الأزرق
+    const LR = 75, lx = W - M - LR, ly = 118, TW = W - 2 * (M + 2 * LR + 16);
+    const logo = await logoImg();
+    c.save(); c.shadowColor = 'rgba(4,20,60,.28)'; c.shadowBlur = 24; c.shadowOffsetY = 8; c.fillStyle = '#FFFFFF'; c.beginPath(); c.arc(lx, ly, LR, 0, Math.PI * 2); c.fill(); c.restore();
+    if (logo) { const lh = LR * 1.5, lw = lh * logo.width / logo.height; c.drawImage(logo, lx - lw / 2, ly - lh / 2, lw, lh); }
     c.fillStyle = '#FFFFFF'; c.textAlign = 'center';
-    c.font = `700 52px ${FD}`; c.fillText(fit(c, D.school, IW, 52, 34, 700, FD), W / 2, 84);
+    c.font = `700 52px ${FD}`; c.fillText(fit(c, D.school, TW, 52, 32, 700, FD), W / 2, 84);
     c.font = `600 34px ${FU}`; c.fillText('حصيلة الاستظهار', W / 2, 148);
-    c.globalAlpha = .92; c.font = `400 28px ${FU}`; c.fillText(fit(c, D.cls + ' · ' + D.date, IW, 28, 20, 400, FU), W / 2, 198); c.globalAlpha = 1;
+    c.globalAlpha = .92; c.font = `400 28px ${FU}`; c.fillText(fit(c, D.cls + ' · ' + D.date, TW, 28, 20, 400, FU), W / 2, 198); c.globalAlpha = 1;
     // البطاقات الثلاث
     const cw = (IW - 40) / 3, cy = 230;
     [[D.done.length, 'استظهروا', '#1E8E5E'], [D.notDone.length, 'لم يستظهروا', '#C47A0F'], [D.abs.length, 'غائبون', '#5F7891']].forEach(([n, t, col], i) => {
@@ -1124,7 +1205,7 @@
     });
     // التذييل
     c.fillStyle = '#4A6178'; c.font = `500 24px ${FU}`;
-    c.textAlign = 'right'; c.fillText(fit(c, 'المعلم: ' + D.teacher, IW / 2, 24, 18, 500, FU), W - M, H - 52);
+    c.textAlign = 'right'; c.fillText(fit(c, 'المعلم(ة): ' + D.teacher, IW / 2, 24, 18, 500, FU), W - M, H - 52);
     c.textAlign = 'left'; c.fillText('بارك الله في أبنائنا', M, H - 52);
     return new Promise(res => cv.toBlob(b => res(b), 'image/png'));
   }
@@ -1215,8 +1296,11 @@
         return renderReports(false);
       }
       case 'rep-retry': { R.err = ''; return renderReports(false); }
+      case 'rep-day': return openDay(b.dataset.d);
+      case 'day-close': return closeDay();
       case 'rep-new': {
         const dt = b.dataset.d; if (!pickable(dt)) return;
+        closeDay(true);
         const dr = savedDraft();
         if (dr && !confirm('لديك تقرير غير مكتمل. حذفه والبدء بتقرير ' + dLabel(dt).full + '؟')) return;
         dropDraft();
@@ -1315,7 +1399,7 @@
     markDirty();
   });
 
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { if ($('.dm-wrap')) closeDay(); else closeSheet(); } });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return persist(true);
     if (S.session && S.session.token && Date.now() - S.lastIdx > 60000) refreshIndex();
